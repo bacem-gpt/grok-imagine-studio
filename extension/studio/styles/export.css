@@ -1,0 +1,633 @@
+/* Export dialog (ui/export/export-dialog.js). Owned by the export module; classes prefixed .ex- */
+
+.ex-modal .modal-body {
+  container-type: inline-size;
+}
+.ex-modal .modal-footer {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.ex-modal.is-running .modal-body,
+.ex-modal.is-done .modal-body {
+  padding: 14px 16px 16px;
+}
+
+.ex-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ex-modal .field-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.ex-label-aside {
+  color: var(--text-2);
+  font-weight: 500;
+  font-size: 11.5px;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ex-modal .field-body > .select {
+  display: flex;
+  width: 100%;
+}
+
+.ex-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.ex-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px 14px;
+  align-items: start;
+}
+
+/* ------------------------------------------------------------------ Format picker */
+
+.ex-formats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.ex-format {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 9px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-2);
+  color: var(--text-1);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, box-shadow 0.12s;
+}
+.ex-format:hover {
+  background: var(--bg-3);
+  border-color: #4a4a5c;
+  color: var(--text-0);
+}
+.ex-format.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--text-0);
+}
+.ex-format.is-unavailable:not(.is-active) {
+  opacity: 0.55;
+}
+.ex-format-icon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--bg-4);
+  color: var(--text-1);
+  transition: background 0.12s, color 0.12s;
+}
+.ex-format.is-active .ex-format-icon {
+  background: linear-gradient(135deg, var(--accent-strong), #5f8bff);
+  color: #fff;
+}
+.ex-format-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.ex-format-label {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+.ex-format-sub {
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ex-format.is-active .ex-format-sub {
+  color: #c9c1ff;
+}
+
+/* ------------------------------------------------------------------ Fields */
+
+.ex-custom-size {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.ex-times {
+  color: var(--text-3);
+}
+.ex-range-detail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.ex-range-detail .select {
+  min-width: 140px;
+  flex: 1;
+}
+.ex-range-label {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.ex-audio-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 2px 0;
+}
+
+.ex-filename {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+}
+.ex-filename .text-field {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  min-width: 0;
+}
+.ex-ext {
+  flex: none;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-left: 0;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--bg-3);
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------------------ Summary & notes */
+
+.ex-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+}
+.ex-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ex-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  color: var(--text-1);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ex-chip .icon {
+  color: var(--text-2);
+}
+.ex-chip.is-strong {
+  background: var(--accent-soft);
+  color: #ded8ff;
+  font-weight: 650;
+}
+.ex-chip.is-strong .icon {
+  color: #c4baff;
+}
+.ex-chip-muted {
+  background: transparent;
+  color: var(--text-2);
+}
+.ex-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-1);
+}
+.ex-note > .icon {
+  margin-top: 1px;
+}
+.ex-note-info > .icon {
+  color: var(--accent-2);
+}
+.ex-note-warn > .icon {
+  color: var(--warn);
+}
+.ex-note-error {
+  color: #ffb3ba;
+}
+.ex-note-error > .icon {
+  color: var(--err);
+}
+.ex-note-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.ex-note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ex-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.ex-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px 9px 12px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 181, 71, 0.35);
+  background: rgba(255, 181, 71, 0.08);
+  color: #ffd9a0;
+}
+.ex-banner.is-error {
+  border-color: rgba(255, 93, 108, 0.4);
+  background: rgba(255, 93, 108, 0.08);
+  color: #ffb3ba;
+}
+.ex-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+.ex-banner-title {
+  font-weight: 650;
+  font-size: 12.5px;
+}
+.ex-banner-body {
+  font-size: 11.5px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ PNG frame */
+
+.ex-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ex-frame-preview {
+  position: relative;
+  width: min(100%, calc(240px * var(--ar, 1.7778)));
+  aspect-ratio: var(--ar, 1.7778);
+  margin: 0 auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+.ex-frame-preview img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+.ex-frame-error {
+  padding: 12px;
+  color: var(--err);
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------ Progress */
+
+.ex-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ex-live {
+  position: relative;
+  width: min(100%, calc(300px * var(--ar, 1.7778)));
+  aspect-ratio: var(--ar, 1.7778);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  overflow: hidden;
+  background-color: #000;
+  margin: 0 auto 4px;
+}
+.ex-live canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.ex-live-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(10, 10, 14, 0.72);
+  backdrop-filter: blur(4px);
+  color: var(--text-0);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+.ex-rec-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--playhead);
+  animation: ex-pulse 1.1s ease-in-out infinite;
+}
+@keyframes ex-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.ex-progress-icon {
+  align-self: center;
+  width: 64px;
+  height: 64px;
+  margin: 10px 0 4px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+  color: #d6cfff;
+}
+.ex-progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.ex-stage {
+  font-weight: 650;
+  font-size: 13.5px;
+}
+.ex-pct {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.ex-progress .progress {
+  height: 10px;
+}
+.ex-progress-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  min-height: 16px;
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.ex-progress-meta span:not(:last-child)::after {
+  content: '·';
+  margin-left: 14px;
+  color: var(--text-3);
+}
+
+/* ------------------------------------------------------------------ Result */
+
+.ex-result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ex-result-media {
+  width: min(100%, calc(340px * var(--ar, 1.7778)));
+  margin: 0 auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background-color: #000;
+}
+.ex-result-media video,
+.ex-result-media img {
+  display: block;
+  width: 100%;
+  aspect-ratio: var(--ar, 1.7778);
+  object-fit: contain;
+  background: #000;
+}
+.ex-result-audio .ex-result-media {
+  width: 100%;
+  background: var(--bg-2);
+}
+.ex-audio {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+.ex-audio-icon {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: rgba(31, 157, 114, 0.18);
+  color: #6be3b4;
+}
+.ex-audio audio {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+}
+.ex-result-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.ex-result-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 650;
+  font-size: 14px;
+  min-height: 26px;
+}
+.ex-result-time {
+  color: var(--text-2);
+  font-weight: 500;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ex-another {
+  margin-right: -6px;
+}
+.ex-ok {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(61, 220, 151, 0.18);
+  color: var(--ok);
+}
+.ex-result-name {
+  font-size: 12.5px;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ex-result-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 0;
+  color: var(--text-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ex-result-meta span:not(:last-child)::after {
+  content: '·';
+  margin: 0 7px;
+  color: var(--text-3);
+}
+
+.ex-result-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 11px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 181, 71, 0.3);
+  background: rgba(255, 181, 71, 0.07);
+}
+
+/* ------------------------------------------------------------------ Inline stop confirmation (footer) */
+
+.ex-modal .modal-footer:has(.ex-stop) {
+  background: rgba(255, 181, 71, 0.06);
+  border-top-color: rgba(255, 181, 71, 0.28);
+}
+.ex-stop {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  animation: ex-stop-in 0.14s var(--ease);
+}
+.ex-stop .icon {
+  flex: none;
+  color: var(--warn);
+}
+.ex-stop-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  line-height: 1.3;
+}
+.ex-stop strong {
+  color: var(--text-0);
+  font-size: 13px;
+  font-weight: 650;
+}
+.ex-stop-sub {
+  color: var(--text-2);
+  font-size: 12px;
+}
+@keyframes ex-stop-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+.ex-error .empty {
+  padding: 18px 8px;
+}
+.ex-error .empty-icon {
+  color: var(--err);
+}
+.ex-error .empty-body {
+  color: #ffb3ba;
+  word-break: break-word;
+}
+
+.ex-footer-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ Narrow (docked studio, ~480 px) */
+
+@container (max-width: 540px) {
+  .ex-formats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container (max-width: 460px) {
+  .ex-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ex-format {
+    padding: 8px 9px;
+  }
+}
+@media (max-width: 560px) {
+  .ex-modal .ex-footer-hint {
+    display: none;
+  }
+  /* The stop question gets its own row; its two buttons stay together below it. */
+  .ex-modal .ex-stop {
+    flex-basis: 100%;
+  }
+}

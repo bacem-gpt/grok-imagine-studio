@@ -1,0 +1,12 @@
+node_modules/
+test-results/
+playwright-report/
+dist/
+*.log
+.DS_Store
+tests/fixtures/media/*.mp4
+tests/fixtures/media/*.webm
+tests/fixtures/media/*.mp3
+tests/fixtures/media/*.wav
+tests/fixtures/media/*.jpg
+tests/fixtures/media/*.png
