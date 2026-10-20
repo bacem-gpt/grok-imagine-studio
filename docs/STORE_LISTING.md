@@ -1,43 +1,45 @@
-# Chrome Web Store listing (draft)
+# Chrome Web Store listing — Imagine Studio for Grok 1.1.0
 
-> Draft for review before submission. The store name must not suggest an official xAI product.
+Copy each block into the matching field of the Chrome Web Store developer dashboard.
+Upload package: `grok-imagine-studio-1.1.0.zip` (release v1.1.0). Images: `store/`.
 
-**Name (≤ 45 chars):** Imagine Studio for Grok
+**Name:** Imagine Studio for Grok
 
 **Short description (≤ 132 chars):**
-Edit Grok Imagine videos right on grok.com: pick the best clips, trim, add music and transitions, export. Plus a prompt workshop.
+Edit Grok Imagine videos right on grok.com: pick clips, trim, add music, transitions, dialogue parts and export. No download needed.
 
-**Category:** Productivity → Tools (alternative: Photos)
-
-**Language:** English
+**Category:** Productivity → Tools · **Language:** English
 
 ## Detailed description
 
-Grok Imagine generates lots of clips. Picking the good ones, trimming them, grabbing stills, laying music under them
-and adding transitions used to mean downloading everything into a separate video editor and coming back to Grok for
-the next round. Imagine Studio does it **right inside grok.com**, in a panel docked next to the Grok page.
+Grok Imagine generates lots of clips. Picking the good ones, trimming them, laying music under them and adding
+transitions used to mean downloading everything into a separate video editor and coming back to Grok for the next
+round. Imagine Studio does it right inside grok.com, in a panel docked next to the Grok page.
 
 COLLECT & PICK
-• Detects every video and image Grok generates for you (Imagine feed, post pages, chats), along with its prompt
-• One-click "+ Bin" on any Grok video, right-click menu, or auto-collect new generations
-• Fast keyboard review: browse, pick, reject, rate, mark in/out
-• "Last frame → Grok": continue a shot from the final frame of a clip
+• Detects every video and image Grok generates for you, with its prompt
+• One-click "+ Bin" on any Grok video, or auto-collect new generations
+• Fast keyboard review: pick, reject, rate, mark in/out — and one-click delete with Undo
 
-EDIT
-• Timeline with trim, split, reorder, undo/redo
-• 22 transitions: dissolve, dip to black/white, wipes, pushes, whip pans, zooms, iris, glitch…
-• Speed, volume, colour looks and filters, fades, Ken Burns on stills, animated titles
-• Add music, voice or sound effects from a file or any URL; mix with clip sound
+EDIT (like iMovie, without leaving Grok)
+• Timeline with trim, split, reorder, undo/redo, 22 transitions
+• Picture in picture, cutaway, side by side and green screen on an overlay track
+• Reverse, freeze frame, instant replay, crop, rotate, colour looks, exposure, temperature, auto enhance
+• Music, voice or sound effects from a file or any URL; EQ presets, ducking, voice-over recording
+• Titles in 11 styles, backgrounds, Ken Burns on stills
+
+LONG DIALOGUES
+• Paste a dialogue: it is split into parts that fit one generated video (15 s or any length)
+• One shot per part; every generated video is labelled with its part, so you know which video says which lines
+• Assemble the videos in dialogue order and add subtitles in one click
+
+PROMPTS
+• Quick phrases: keep "nobody speaks", "camera angle from top"… as one-click chips; phrase sets; 120 prepared phrases
+• Shot list with a structured prompt builder, snippets, character bible, prompt-list import
+• Send a shot to Grok's prompt box (with reference images); new takes link back to the shot
 
 EXPORT
-• MP4 (H.264 + AAC) or WebM, any resolution or frame rate, rendered in your browser
-• PNG frame grabs and WAV audio mixdowns
-
-PREPARE YOUR NEXT PROMPTS
-• Shot list / storyboard with a structured prompt builder and preset chips (camera, lens, lighting, style, mood…)
-• Prepared texts (snippets), a character/location bible with {{tokens}}, variations, prompt-list import
-• Send a shot to Grok's prompt box (with reference images); new takes link back to the shot; one click assembles the timeline
-• Reference-image library: crop, resize, adjust, combine into reference sheets, attach to Grok
+• MP4 or WebM at any resolution and frame rate, rendered in your browser; PNG frames, WAV audio
 
 PRIVATE BY DESIGN
 No account, no servers, no analytics. Everything stays in your browser.
@@ -45,29 +47,33 @@ No account, no servers, no analytics. Everything stays in your browser.
 Imagine Studio is an independent project and is not affiliated with, endorsed by, or sponsored by xAI. "Grok" is a
 trademark of its respective owner.
 
-## Single purpose (required field)
+## Privacy practices tab
 
+**Single purpose:**
 Edit and assemble the media you generate with Grok Imagine (collect, trim, add audio and transitions, export), and
-prepare the prompts and reference images you send to Grok, directly on grok.com.
+prepare the prompts you send to Grok, directly on grok.com.
 
-## Permission justifications
+**Permission justifications:**
 
-| Permission | Justification |
+| Field | Text |
 |---|---|
-| Host `grok.com`, `*.grok.com` | Show the editor panel on grok.com, detect the user's generated media and prompts, and fill Grok's prompt box when the user clicks Send. |
-| Host `*.grokusercontent.com`, `*.x.ai` | Download the user's generated videos and images from Grok's asset servers so they can be edited locally. |
-| Optional host `<all_urls>` | Requested per site, only when the user imports an audio or video file from a URL. |
-| `storage`, `unlimitedStorage` | Store projects and media files locally; videos are large. |
-| `downloads` | Save exported videos, frames and audio. |
-| `contextMenus` | "Add to Imagine Studio" entries on grok.com images and videos. |
-| Remote code | None. All code ships in the package (MV3). |
+| storage | Stores the user's projects, prompts and settings locally. |
+| unlimitedStorage | Generated videos are large; they are kept locally so the user can edit them. |
+| downloads | Saves the videos, frames and audio the user exports. |
+| contextMenus | Adds "Add to Imagine Studio" to the right-click menu on Grok images and videos. |
+| scripting | Starts the studio panel on a grok.com tab that was already open when the extension was installed or updated, without a reload. |
+| Host permissions | grok.com: shows the editor panel, detects the user's generated media and prompts, fills Grok's prompt box when the user clicks Send. *.grokusercontent.com and *.imagine-public.x.ai: downloads the user's generated videos and images from Grok's asset servers for local editing. Optional <all_urls>: requested per site only when the user imports an audio or video file from a URL. |
+| Remote code | No, I am not using remote code. |
 
-## Data usage disclosures
+**Data usage:** check none of the data types. Certify: does not sell or transfer user data to third parties; does not
+use or transfer it for purposes unrelated to the single purpose; does not use it for creditworthiness or lending.
 
-Does not collect or transmit user data. Everything is stored locally. Privacy policy: `docs/PRIVACY.md` (to be published at a public URL).
+**Privacy policy URL:** https://bacem-gpt.github.io/grok-imagine-studio/PRIVACY
 
-## Assets to provide
+## Store listing tab — assets
 
-- Icon 128×128: `extension/icons/icon128.png`
-- Screenshots 1280×800 (3–5): Clips tab with grok.com feed, Edit timeline with transitions, Export dialog, Prompts workshop, Ingredients editor
-- Small promo tile 440×280
+- Store icon 128×128: `extension/icons/icon128.png`
+- Screenshots 1280×800: `store/screenshot-1-dialogue.png`, `store/screenshot-2-phrases.png`, `store/screenshot-3-edit.png`, `store/screenshot-4-export.png`
+- Small promo tile 440×280: `store/promo-tile-440x280.png`
+- Homepage URL: https://github.com/bacem-gpt/grok-imagine-studio
+- Support URL: https://github.com/bacem-gpt/grok-imagine-studio/issues

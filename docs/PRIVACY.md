@@ -1,8 +1,8 @@
 # Privacy policy
 
-_Last updated: 2026-10-19_
+_Last updated: 2026-10-20_
 
-Grok Imagine Studio (the "extension") is a browser extension that adds a video editor and prompt workshop to
+Imagine Studio for Grok (the "extension") is a browser extension that adds a video editor and prompt workshop to
 grok.com. It is an independent project and is **not affiliated with, endorsed by, or sponsored by xAI**.
 
 ## Summary
@@ -17,11 +17,13 @@ grok.com. It is an independent project and is **not affiliated with, endorsed by
 | Access | Why |
 |---|---|
 | Pages on `grok.com` | To show the studio panel and detect the images and videos Grok generated for you, with their prompts, so you can collect them. It reads Grok's own media API responses in your browser and never modifies or forwards them. |
-| `assets.grok.com`, `*.grokusercontent.com`, `*.x.ai` | To download **your** generated media into the studio so you can edit it locally. Requests go only to these Grok asset hosts, with your existing browser session. |
+| `assets.grok.com`, `*.grokusercontent.com`, `*.imagine-public.x.ai` | To download **your** generated media into the studio so you can edit it locally. Requests go only to these Grok asset hosts, with your existing browser session. |
 | Other websites (optional, per site) | Only when **you** import an audio or video file from a URL. The browser asks your permission for that one site first. |
 | `storage`, `unlimitedStorage` | To keep your projects and media locally. Video files can be large. |
 | `downloads` | To save the videos, frames and audio you export. |
 | `contextMenus` | To add "Add to Imagine Studio" entries to the right-click menu on grok.com. |
+| `scripting` | To start the studio on a grok.com tab that was already open when the extension was installed or updated, without reloading it. |
+| Microphone (only when you click **Record voice-over**) | To record your voice-over. The browser asks your permission first. The recording is stored locally in your project like any other audio clip and is never uploaded. |
 
 When you click **Send to Grok** or **Attach to Grok**, the extension types the prompt into, or attaches the image to,
 grok.com's own prompt box in your browser, exactly as if you had done it by hand. Grok's handling of that content is
