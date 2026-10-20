@@ -7,6 +7,8 @@
 //                    the transition duration (so total = sum(durations) - sum(transitions)).
 //  * tracks.audio  — free-positioned audio clips (music, voice, sfx) with absolute `start`, on lanes (`lane`).
 //  * tracks.text   — free-positioned text overlays (titles, captions) with absolute `start`, on lanes.
+//  * tracks.overlay — free-positioned video/image overlays above the main track (iMovie's picture-in-picture,
+//                    cutaway, side-by-side and green/blue screen) with absolute `start`, on lanes (higher lane on top).
 //  A clip's on-timeline duration = (out - in) / speed. `in`/`out` are source-media seconds.
 //  All functions are immutable: they return new objects and never mutate their inputs.
 
@@ -69,6 +71,9 @@ export const FILTER_DEFAULTS = Object.freeze({
   invert: 0, // 0..1
   blur: 0, // px at 720p reference height, 0..20
   vignette: 0, // 0..1
+  exposure: 0, // EV stops -2..2 (rendered as a brightness gain of 2^EV)
+  temperature: 0, // white balance -1 (cool / blue) .. 1 (warm / amber)
+  tint: 0, // white balance -1 (green) .. 1 (magenta)
 });
 
 /** One-click looks (merged over FILTER_DEFAULTS). */
@@ -85,7 +90,7 @@ export const FILTER_PRESETS = [
   { id: 'dream', name: 'Dreamy', filters: { blur: 1.2, brightness: 1.1, saturate: 1.2 } },
 ];
 
-export const TEXT_ANIMATIONS = ['none', 'fade', 'slide-up', 'pop', 'typewriter'];
+export const TEXT_ANIMATIONS = ['none', 'fade', 'slide-up', 'pop', 'typewriter', 'scroll-up'];
 
 export const TEXT_STYLE_DEFAULTS = Object.freeze({
   font: 'Inter, system-ui, sans-serif',
@@ -100,6 +105,7 @@ export const TEXT_STYLE_DEFAULTS = Object.freeze({
   outline: false,
   italic: false,
   maxWidth: 0.9, // fraction of width used for wrapping
+  letterbox: false, // cinematic black bars (top and bottom) while the title shows
 });
 
 // ---------------------------------------------------------------------------------------------------------
@@ -117,11 +123,12 @@ export function createProject(name = 'Untitled sequence') {
     settings: { width: 1280, height: 720, fps: 30, background: '#000000' },
     media: {}, // id -> MediaItem
     mediaOrder: [], // bin order, newest first
-    tracks: { video: [], audio: [], text: [] },
+    tracks: { video: [], audio: [], text: [], overlay: [] },
     markers: [], // {id, time, label, color}
     shots: [], // storyboard / prompt list (owned by the Prompts tab, see prompts/prompt-model.js)
     bible: { characters: [], locations: [], style: '', notes: '' },
     exportSettings: null, // last used export options
+    dialogue: null, // dialogue planner: parts linked to shots (see prompts/dialogue.js)
   };
 }
 
@@ -305,6 +312,7 @@ export function layoutVideo(clips) {
 
 export function layoutProject(project) {
   const video = layoutVideo(project.tracks.video);
+  const overlay = layoutOverlay(project.tracks.overlay || []);
   const audio = project.tracks.audio.map((clip) => ({
     clip,
     start: clip.start,
@@ -313,8 +321,8 @@ export function layoutProject(project) {
   }));
   const text = project.tracks.text.map((clip) => ({ clip, start: clip.start, end: clip.start + clip.duration, duration: clip.duration }));
   const videoEnd = video.length ? video[video.length - 1].end : 0;
-  const duration = Math.max(videoEnd, ...audio.map((a) => a.end), ...text.map((t) => t.end), 0);
-  return { video, audio, text, videoEnd, duration };
+  const duration = Math.max(videoEnd, ...audio.map((a) => a.end), ...text.map((t) => t.end), ...overlay.map((o) => o.end), 0);
+  return { video, audio, text, overlay, videoEnd, duration };
 }
 
 export const sequenceDuration = (project) => layoutProject(project).duration;
@@ -332,14 +340,20 @@ export function videoItemsAt(videoLayout, t) {
 /** Source-media time shown by a main-track item at timeline time t. */
 export function sourceTimeAt(item, t) {
   const { clip } = item;
+  if (clip.freeze) return Math.max(0, Number(clip.freezeAt) || 0); // a held still of one frame
   const local = clamp(t - item.start, 0, item.duration);
-  const src = clip.in + local * (clip.speed || 1);
+  const step = local * (clip.speed || 1);
+  // A reversed clip runs from its out-point back to its in-point.
+  const src = clip.reverse ? clip.out - step : clip.in + step;
   return clamp(src, clip.in, Math.max(clip.in, clip.out - 1e-3));
 }
 
-/** Inverse of sourceTimeAt for a main-track item. */
+/** Inverse of sourceTimeAt for a main-track item (a freeze frame maps every source time to its start). */
 export function timelineTimeOf(item, sourceTime) {
-  return item.start + (sourceTime - item.clip.in) / (item.clip.speed || 1);
+  const { clip } = item;
+  if (clip.freeze) return item.start;
+  if (clip.reverse) return item.start + (clip.out - sourceTime) / (clip.speed || 1);
+  return item.start + (sourceTime - clip.in) / (clip.speed || 1);
 }
 
 /** Opacity multiplier from clip fades at timeline time t (1 = fully visible). */
@@ -390,6 +404,10 @@ export function snapPoints(project, extra = []) {
     pts.add(x.start);
     pts.add(x.end);
   }
+  for (const o of lay.overlay) {
+    pts.add(o.start);
+    pts.add(o.end);
+  }
   for (const m of project.markers || []) pts.add(m.time);
   return [...pts].sort((a, b) => a - b);
 }
@@ -412,11 +430,15 @@ export function snapTime(t, points, threshold) {
 // Lookups
 // ---------------------------------------------------------------------------------------------------------
 
-/** Finds a clip on any track: {track: 'video'|'audio'|'text', index, clip} or null. */
+/** Every track that holds clips (findClip / mergeProjects order: main track first). */
+export const CLIP_TRACKS = ['video', 'audio', 'text', 'overlay'];
+
+/** Finds a clip on any track: {track: 'video'|'audio'|'text'|'overlay', index, clip} or null. */
 export function findClip(project, id) {
-  for (const track of ['video', 'audio', 'text']) {
-    const index = project.tracks[track].findIndex((c) => c.id === id);
-    if (index >= 0) return { track, index, clip: project.tracks[track][index] };
+  for (const track of CLIP_TRACKS) {
+    const clips = project.tracks[track] || [];
+    const index = clips.findIndex((c) => c.id === id);
+    if (index >= 0) return { track, index, clip: clips[index] };
   }
   return null;
 }
@@ -474,9 +496,11 @@ export function removeMedia(project, ids) {
     media,
     mediaOrder: project.mediaOrder.filter((id) => !set.has(id)),
     tracks: {
+      ...project.tracks,
       video: fixFirstTransition(project.tracks.video.filter((c) => !set.has(c.mediaId))),
       audio: project.tracks.audio.filter((c) => !set.has(c.mediaId)),
       text: project.tracks.text,
+      overlay: (project.tracks.overlay || []).filter((c) => !set.has(c.mediaId)),
     },
   });
 }
@@ -499,7 +523,7 @@ export function findMediaForPageItem(project, item) {
 /** Clips referencing a media item: [{track, clip}] */
 export function mediaUsage(project, mediaId) {
   const res = [];
-  for (const track of ['video', 'audio']) for (const clip of project.tracks[track]) if (clip.mediaId === mediaId) res.push({ track, clip });
+  for (const track of ['video', 'audio', 'overlay']) for (const clip of project.tracks[track] || []) if (clip.mediaId === mediaId) res.push({ track, clip });
   return res;
 }
 
@@ -515,6 +539,7 @@ export function updateClip(project, id, patch) {
   if (found.track === 'video') next = sanitizeVideoClip(project, next);
   if (found.track === 'audio') next = sanitizeAudioClip(project, next);
   if (found.track === 'text') next = { ...next, start: Math.max(0, next.start), duration: Math.max(MIN_CLIP_DURATION, next.duration) };
+  if (found.track === 'overlay') next = sanitizeOverlayClip(project, next);
   clips[found.index] = next;
   return withTrack(project, found.track, found.track === 'video' ? fixFirstTransition(clips) : clips);
 }
@@ -525,9 +550,11 @@ export function removeClips(project, ids) {
   return touch({
     ...project,
     tracks: {
+      ...project.tracks,
       video: fixFirstTransition(project.tracks.video.filter((c) => !set.has(c.id))),
       audio: project.tracks.audio.filter((c) => !set.has(c.id)),
       text: project.tracks.text.filter((c) => !set.has(c.id)),
+      overlay: (project.tracks.overlay || []).filter((c) => !set.has(c.id)),
     },
   });
 }
@@ -559,7 +586,14 @@ export function duplicateClips(project, ids) {
     newIds.push(copy.id);
     text.push(copy);
   }
-  return { project: touch({ ...project, tracks: { video, audio, text } }), ids: newIds };
+  const overlay = [...(project.tracks.overlay || [])];
+  for (const c of project.tracks.overlay || []) {
+    if (!set.has(c.id)) continue;
+    const copy = { ...cloneClip(c), id: uid('ovl'), start: c.start + clipDuration(c) };
+    newIds.push(copy.id);
+    overlay.push(copy);
+  }
+  return { project: touch({ ...project, tracks: { ...project.tracks, video, audio, text, overlay } }), ids: newIds };
 }
 
 // --- main (video) track ---
@@ -575,14 +609,15 @@ function fixFirstTransition(clips) {
 }
 
 export function sanitizeVideoClip(project, clip) {
-  const max = mediaMaxTime(project, clip.mediaId);
-  const speed = clamp(Number(clip.speed) || 1, MIN_SPEED, MAX_SPEED);
+  // A freeze frame's in/out only carry its hold length (0..hold): no media bound, no speed.
+  const max = clip.freeze ? Infinity : mediaMaxTime(project, clip.mediaId);
+  const speed = clip.freeze ? 1 : clamp(Number(clip.speed) || 1, MIN_SPEED, MAX_SPEED);
   let inP = clamp(Number(clip.in) || 0, 0, Number.isFinite(max) ? Math.max(0, max - MIN_CLIP_DURATION * speed) : Infinity);
   let outP = Number(clip.out);
   if (!Number.isFinite(outP)) outP = inP + DEFAULT_IMAGE_DURATION;
   outP = clamp(outP, inP + MIN_CLIP_DURATION * speed, max);
   if (outP - inP < MIN_CLIP_DURATION * speed) inP = Math.max(0, outP - MIN_CLIP_DURATION * speed);
-  return {
+  return sanitizeClipTools(project, {
     ...clip,
     in: inP,
     out: outP,
@@ -591,7 +626,7 @@ export function sanitizeVideoClip(project, clip) {
     fadeIn: clamp(Number(clip.fadeIn) || 0, 0, (outP - inP) / speed),
     fadeOut: clamp(Number(clip.fadeOut) || 0, 0, (outP - inP) / speed),
     transition: clip.transition && clip.transition.type !== 'cut' ? createTransition(clip.transition.type, clip.transition.duration) : null,
-  };
+  });
 }
 
 /** Inserts main-track clips at index (default: end). */
@@ -649,9 +684,11 @@ export function splitVideoAt(project, t, clipId = null) {
   const local = t - item.start;
   if (local < MIN_CLIP_DURATION - EPS || item.duration - local < MIN_CLIP_DURATION - EPS) return { project, leftId: null, rightId: null };
   const { clip } = item;
-  const srcSplit = clip.in + local * (clip.speed || 1);
-  const left = { ...clip, out: srcSplit, fadeOut: 0, autoOut: false };
-  const right = { ...clip, id: uid('clp'), in: srcSplit, transition: null, fadeIn: 0, filters: clip.filters ? { ...clip.filters } : null, autoOut: false };
+  // A reversed clip shows [srcSplit, out] (backwards) before the cut and [in, srcSplit] after it.
+  const srcSplit = clip.reverse && !clip.freeze ? clip.out - local * (clip.speed || 1) : clip.in + local * (clip.speed || 1);
+  const rev = clip.reverse && !clip.freeze;
+  const left = { ...clip, ...(rev ? { in: srcSplit } : { out: srcSplit }), fadeOut: 0, autoOut: false };
+  const right = { ...clip, id: uid('clp'), ...(rev ? { out: srcSplit } : { in: srcSplit }), transition: null, fadeIn: 0, filters: clip.filters ? { ...clip.filters } : null, autoOut: false };
   if (clip.kenBurns) {
     // Keep the Ken Burns motion continuous across the cut.
     const k = local / item.duration;
@@ -695,6 +732,7 @@ export function sanitizeAudioClip(project, clip) {
     fadeIn: clamp(Number(clip.fadeIn) || 0, 0, outP - inP),
     fadeOut: clamp(Number(clip.fadeOut) || 0, 0, outP - inP),
     lane: Math.max(0, Math.floor(Number(clip.lane) || 0)),
+    ...('duckAmount' in clip ? { duckAmount: clamp(Number(clip.duckAmount ?? DEFAULT_DUCK_AMOUNT), 0, 1) } : {}),
   };
 }
 
@@ -780,8 +818,409 @@ export function splitAllAt(project, t, selectedIds = []) {
     if (!f) continue;
     if (f.track === 'audio') p = splitAudioAt(p, id, t).project;
     if (f.track === 'text') p = splitTextAt(p, id, t).project;
+    if (f.track === 'overlay') p = splitOverlayAt(p, id, t).project;
   }
   return p;
+}
+
+// --- overlay track (picture in picture, cutaway, side by side, green/blue screen) ---
+
+export const OVERLAY_MODES = [
+  { id: 'pip', name: 'Picture in picture' },
+  { id: 'cutaway', name: 'Cutaway' },
+  { id: 'split', name: 'Side by side' },
+  { id: 'greenscreen', name: 'Green/blue screen' },
+];
+const OVERLAY_MODE_IDS = new Set(OVERLAY_MODES.map((m) => m.id));
+/** Overlay entrance/exit animations (iMovie offers dissolve / zoom for picture in picture). */
+export const OVERLAY_TRANSITIONS = [
+  { id: 'none', name: 'None' },
+  { id: 'dissolve', name: 'Dissolve' },
+  { id: 'zoom', name: 'Zoom' },
+  { id: 'slide', name: 'Slide' },
+];
+const OVERLAY_TRANSITION_IDS = new Set(OVERLAY_TRANSITIONS.map((t) => t.id));
+export const SPLIT_SIDES = ['left', 'right', 'top', 'bottom'];
+
+/**
+ * Picture-in-picture box. x / y place the box inside the frame's free space (0 = left/top inset, 1 = right/bottom
+ * inset), so a corner stays a corner whatever the scale; scale = box width as a fraction of the frame width (the box
+ * keeps the source's aspect ratio). border / radius: px at a 720p reference height; shadow: drop shadow.
+ */
+export const PIP_DEFAULTS = Object.freeze({ x: 1, y: 0, scale: 0.36, border: 0, borderColor: '#ffffff', radius: 0, shadow: true });
+/** Side by side: the overlay takes `size` (fraction) of the frame on `side`; the main track fills the rest. */
+export const SPLIT_DEFAULTS = Object.freeze({ side: 'left', size: 0.5 });
+/** Chroma key: colour removed, tolerance (0..1 chroma distance), softness (edge feather, 0..1), spill suppression 0..1. */
+export const KEY_DEFAULTS = Object.freeze({ color: '#00ff00', tolerance: 0.4, softness: 0.1, spill: 0.5 });
+export const OVERLAY_TRANSITION_DEFAULT = Object.freeze({ type: 'none', duration: 0.5 });
+
+const cloneClip = (c) => JSON.parse(JSON.stringify(c));
+const hexColor = (v, fallback) => (/^#[0-9a-f]{6}$/i.test(String(v || '')) ? String(v).toLowerCase() : fallback);
+
+/**
+ * A clip on the overlay track (videos and stills; stills default to DEFAULT_IMAGE_DURATION seconds).
+ * @typedef {Object} OverlayClip
+ * @property {string} id
+ * @property {string} mediaId
+ * @property {number} start   timeline seconds
+ * @property {number} in      source seconds
+ * @property {number} out     source seconds
+ * @property {number} speed
+ * @property {number} volume
+ * @property {boolean} muted
+ * @property {number} fadeIn  seconds (picture opacity and sound)
+ * @property {number} fadeOut
+ * @property {number} lane    0 = just above the main track; higher lanes draw on top
+ * @property {string} label
+ * @property {'pip'|'cutaway'|'split'|'greenscreen'} mode
+ * @property {{x:number,y:number,scale:number,border:number,borderColor:string,radius:number,shadow:boolean}} pip
+ * @property {{side:'left'|'right'|'top'|'bottom', size:number}} split
+ * @property {{color:string, tolerance:number, softness:number, spill:number}} key
+ * @property {Object|null} filters
+ * @property {'cover'|'contain'|'fill'} fit   framing for cutaway / side by side / green screen
+ * @property {{type:'none'|'dissolve'|'zoom'|'slide', duration:number}} transitionIn
+ * @property {{type:'none'|'dissolve'|'zoom'|'slide', duration:number}} transitionOut
+ */
+export function createOverlayClip(media, opts = {}) {
+  const range = defaultRange(media);
+  return {
+    id: opts.id || uid('ovl'),
+    autoOut: media.kind === 'video' && !(media.duration > 0) && opts.out == null,
+    mediaId: media.id,
+    start: Math.max(0, opts.start ?? 0),
+    in: opts.in ?? range.in,
+    out: opts.out ?? range.out,
+    speed: opts.speed ?? 1,
+    volume: opts.volume ?? 1,
+    muted: opts.muted ?? false,
+    fadeIn: opts.fadeIn ?? 0,
+    fadeOut: opts.fadeOut ?? 0,
+    lane: opts.lane ?? 0,
+    label: opts.label || '',
+    mode: opts.mode || 'pip',
+    pip: { ...PIP_DEFAULTS, ...(opts.pip || {}) },
+    split: { ...SPLIT_DEFAULTS, ...(opts.split || {}) },
+    key: { ...KEY_DEFAULTS, ...(opts.key || {}) },
+    filters: opts.filters ? { ...opts.filters } : null,
+    fit: opts.fit || 'cover',
+    transitionIn: { ...OVERLAY_TRANSITION_DEFAULT, ...(opts.transitionIn || {}) },
+    transitionOut: { ...OVERLAY_TRANSITION_DEFAULT, ...(opts.transitionOut || {}) },
+  };
+}
+
+function sanitizeOverlayTransition(tr, maxDuration) {
+  const type = OVERLAY_TRANSITION_IDS.has(tr?.type) ? tr.type : 'none';
+  return { type, duration: clamp(Number(tr?.duration) || OVERLAY_TRANSITION_DEFAULT.duration, 0.05, Math.max(0.05, Math.min(5, maxDuration))) };
+}
+
+/** Repairs/clamps an overlay clip (range within its media, speed, numeric settings, known enums). */
+export function sanitizeOverlayClip(project, clip) {
+  const range = sanitizeVideoRange(project, clip);
+  const dur = (range.out - range.in) / range.speed;
+  const pip = { ...PIP_DEFAULTS, ...(clip.pip || {}) };
+  const split = { ...SPLIT_DEFAULTS, ...(clip.split || {}) };
+  const key = { ...KEY_DEFAULTS, ...(clip.key || {}) };
+  return {
+    ...clip,
+    ...range,
+    start: Math.max(0, Number(clip.start) || 0),
+    volume: clamp(Number(clip.volume ?? 1), 0, 2),
+    muted: !!clip.muted,
+    fadeIn: clamp(Number(clip.fadeIn) || 0, 0, dur),
+    fadeOut: clamp(Number(clip.fadeOut) || 0, 0, dur),
+    lane: clamp(Math.floor(Number(clip.lane) || 0), 0, 15),
+    mode: OVERLAY_MODE_IDS.has(clip.mode) ? clip.mode : 'pip',
+    pip: {
+      x: clamp(Number(pip.x ?? 1), 0, 1),
+      y: clamp(Number(pip.y ?? 0), 0, 1),
+      scale: clamp(Number(pip.scale) || PIP_DEFAULTS.scale, 0.1, 1),
+      border: clamp(Number(pip.border) || 0, 0, 24),
+      borderColor: hexColor(pip.borderColor, PIP_DEFAULTS.borderColor),
+      radius: clamp(Number(pip.radius) || 0, 0, 80),
+      shadow: pip.shadow !== false,
+    },
+    split: { side: SPLIT_SIDES.includes(split.side) ? split.side : 'left', size: clamp(Number(split.size) || 0.5, 0.2, 0.8) },
+    key: {
+      color: hexColor(key.color, KEY_DEFAULTS.color),
+      tolerance: clamp(Number(key.tolerance ?? KEY_DEFAULTS.tolerance), 0, 1),
+      softness: clamp(Number(key.softness ?? KEY_DEFAULTS.softness), 0, 1),
+      spill: clamp(Number(key.spill ?? KEY_DEFAULTS.spill), 0, 1),
+    },
+    fit: ['cover', 'contain', 'fill'].includes(clip.fit) ? clip.fit : 'cover',
+    transitionIn: sanitizeOverlayTransition(clip.transitionIn, dur / 2),
+    transitionOut: sanitizeOverlayTransition(clip.transitionOut, dur / 2),
+  };
+}
+
+/** in / out / speed of a video-like clip clamped to its media (same rules as main-track clips). */
+function sanitizeVideoRange(project, clip) {
+  const max = mediaMaxTime(project, clip.mediaId);
+  const speed = clamp(Number(clip.speed) || 1, MIN_SPEED, MAX_SPEED);
+  let inP = clamp(Number(clip.in) || 0, 0, Number.isFinite(max) ? Math.max(0, max - MIN_CLIP_DURATION * speed) : Infinity);
+  let outP = Number(clip.out);
+  if (!Number.isFinite(outP)) outP = inP + DEFAULT_IMAGE_DURATION;
+  outP = clamp(outP, inP + MIN_CLIP_DURATION * speed, max);
+  if (outP - inP < MIN_CLIP_DURATION * speed) inP = Math.max(0, outP - MIN_CLIP_DURATION * speed);
+  return { in: inP, out: outP, speed };
+}
+
+/**
+ * @typedef {Object} OverlayLayoutItem   same shape as a main-track item where it matters (clip, start, end, duration),
+ *   so sourceTimeAt / fadeFactor / getSource(item) work unchanged; `track` tells them apart (no `index`, no `transIn`).
+ * @property {Object} clip
+ * @property {'overlay'} track
+ * @property {number} start
+ * @property {number} end
+ * @property {number} duration
+ */
+export function layoutOverlay(clips = []) {
+  return clips.map((clip) => {
+    const duration = clipDuration(clip);
+    return { clip, track: 'overlay', start: clip.start, end: clip.start + duration, duration };
+  });
+}
+
+/** Overlay items visible at time t, bottom lane first (draw order). */
+export function overlayItemsAt(overlayLayout = [], t) {
+  const res = [];
+  for (const it of overlayLayout) if (t >= it.start - EPS && t < it.end - EPS) res.push(it);
+  return res.sort((a, b) => (a.clip.lane || 0) - (b.clip.lane || 0));
+}
+
+/** Stable per-render key of a layout item: the main-track index, or `ov:<clip id>` for overlays. */
+export const layoutItemKey = (item) => (item.track === 'overlay' ? `ov:${item.clip.id}` : item.index);
+
+const overlaySpans = (clips) => clips.map((c) => ({ id: c.id, lane: c.lane || 0, start: c.start, duration: clipDuration(c) }));
+
+/** Adds a video or still to the overlay track (first free lane unless `opts.lane`). Returns {project, id}. */
+export function addOverlayClip(project, mediaId, opts = {}) {
+  const m = project.media[mediaId];
+  if (!m || m.kind === 'audio') return { project, id: null };
+  const clip = createOverlayClip(m, opts);
+  const safe = sanitizeOverlayClip(project, clip);
+  const track = project.tracks.overlay || [];
+  if (opts.lane == null) safe.lane = freeLane(overlaySpans(track), safe.start, safe.start + clipDuration(safe));
+  return { project: withTrack(project, 'overlay', [...track, safe]), id: safe.id };
+}
+
+/** Moves an overlay clip to timeline time `start` (clamped at 0) and, when given, to `lane`. */
+export function moveOverlayClip(project, id, start, lane) {
+  const found = findClip(project, id);
+  if (!found || found.track !== 'overlay') return project;
+  return updateClip(project, id, { start: Math.max(0, start), ...(lane != null ? { lane } : {}) });
+}
+
+/**
+ * Trims an overlay clip edge to timeline time T. 'in' keeps the clip's end where it is (the source in-point moves with
+ * the edge; a still simply gets longer/shorter), 'out' moves the source out-point.
+ */
+export function trimOverlayClip(project, id, edge, T) {
+  const found = findClip(project, id);
+  if (!found || found.track !== 'overlay') return project;
+  const c = found.clip;
+  const speed = c.speed || 1;
+  const end = c.start + clipDuration(c);
+  if (edge === 'in') {
+    const t = clamp(T, 0, end - MIN_CLIP_DURATION);
+    if (project.media[c.mediaId]?.kind === 'image') return updateClip(project, id, { start: t, in: 0, out: (end - t) * speed });
+    const newIn = clamp(c.in + (t - c.start) * speed, 0, c.out - MIN_CLIP_DURATION * speed);
+    return updateClip(project, id, { in: newIn, start: c.start + (newIn - c.in) / speed });
+  }
+  return updateClip(project, id, { out: c.in + (Math.max(T, c.start + MIN_CLIP_DURATION) - c.start) * speed });
+}
+
+/** Splits an overlay clip at timeline time t. Returns {project, rightId} (null when t is too close to an edge). */
+export function splitOverlayAt(project, id, t) {
+  const found = findClip(project, id);
+  if (!found || found.track !== 'overlay') return { project, rightId: null };
+  const c = found.clip;
+  const local = t - c.start;
+  if (local < MIN_CLIP_DURATION || clipDuration(c) - local < MIN_CLIP_DURATION) return { project, rightId: null };
+  const src = c.in + local * (c.speed || 1);
+  const none = { ...OVERLAY_TRANSITION_DEFAULT };
+  const left = { ...c, out: src, fadeOut: 0, transitionOut: none, autoOut: false };
+  const right = { ...cloneClip(c), id: uid('ovl'), start: t, in: src, fadeIn: 0, transitionIn: { ...none }, autoOut: false };
+  const arr = project.tracks.overlay.slice();
+  arr.splice(found.index, 1, left, right);
+  return { project: withTrack(project, 'overlay', arr), rightId: right.id };
+}
+
+/**
+ * Moves a main-track clip onto the overlay track at the time it played (the main track closes the gap), keeping its
+ * range, speed, sound, fades and look. Returns {project, id}.
+ */
+export function videoClipToOverlay(project, clipId, opts = {}) {
+  const found = findClip(project, clipId);
+  if (!found || found.track !== 'video') return { project, id: null };
+  const item = layoutVideo(project.tracks.video).find((it) => it.clip.id === clipId);
+  const c = found.clip;
+  const removed = removeClips(project, [clipId]);
+  return addOverlayClip(removed, c.mediaId, {
+    start: opts.start ?? item.start,
+    in: c.in,
+    out: c.out,
+    speed: c.speed,
+    volume: c.volume,
+    muted: c.muted,
+    fadeIn: c.fadeIn,
+    fadeOut: c.fadeOut,
+    filters: c.filters,
+    label: c.label,
+    mode: opts.mode,
+  });
+}
+
+/** Moves an overlay clip back to the main track, inserted at the cut nearest to where it starts. Returns {project, id}. */
+export function overlayClipToMain(project, clipId) {
+  const found = findClip(project, clipId);
+  if (!found || found.track !== 'overlay') return { project, id: null };
+  const c = found.clip;
+  const m = project.media[c.mediaId];
+  if (!m) return { project, id: null };
+  const index = insertionIndexAt(layoutVideo(project.tracks.video), c.start);
+  const clip = createVideoClip(m, { in: c.in, out: c.out, speed: c.speed, volume: c.volume, muted: c.muted, fadeIn: c.fadeIn, fadeOut: c.fadeOut, filters: c.filters, label: c.label });
+  return { project: insertVideoClips(removeClips(project, [clipId]), [clip], index), id: clip.id };
+}
+
+// --- clip tools (iMovie-style: reverse, freeze frame, instant replay, crop / rotate / flip, ducking) ---
+//
+// Extra main-track clip fields (all optional — a clip without them behaves as before):
+//   reverse: boolean            plays the source range backwards (out -> in); its sound is reversed in the export
+//   freeze: boolean, freezeAt   a held still of the source frame at `freezeAt` seconds; in = 0, out = hold length
+//   crop: {x, y, w, h} | null   normalized rectangle of the (unrotated) source picture; null = the whole picture
+//   rotate: 0 | 90 | 180 | 270  clockwise, applied after the crop (90/270 swap the picture's aspect for the fit)
+//   flipH, flipV: boolean       mirror the (rotated) picture horizontally / vertically
+//   eq: EQ preset id            (engine/audio-fx.js EQ_PRESETS; also on audio-track clips)
+// Extra audio-track clip fields: duck: boolean (lower every other sound while this clip plays), duckAmount 0..1.
+
+export const DEFAULT_FREEZE_DURATION = 2;
+export const DEFAULT_DUCK_AMOUNT = 0.7;
+export const MIN_CROP = 0.05;
+export const ROTATIONS = [0, 90, 180, 270];
+
+/** Normalized crop rectangle clamped inside the picture (null for "no crop": missing, invalid or the full frame). */
+export function normalizeCrop(crop) {
+  if (!crop || typeof crop !== 'object') return null;
+  const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
+  const w = clamp(num(crop.w, 1), MIN_CROP, 1);
+  const h = clamp(num(crop.h, 1), MIN_CROP, 1);
+  const x = clamp(num(crop.x, 0), 0, 1 - w);
+  const y = clamp(num(crop.y, 0), 0, 1 - h);
+  if (w > 0.999 && h > 0.999) return null;
+  const r = (v) => Math.round(v * 1e4) / 1e4;
+  return { x: r(x), y: r(y), w: r(w), h: r(h) };
+}
+
+/** Rotation snapped to a quarter turn in [0, 360). */
+export const normalizeRotation = (deg) => ((((Math.round((Number(deg) || 0) / 90) * 90) % 360) + 360) % 360);
+
+/** Repairs the clip-tool fields of a main-track clip (only the ones present, so older clips keep their shape). */
+export function sanitizeClipTools(project, clip) {
+  const out = { ...clip };
+  if ('crop' in out) out.crop = normalizeCrop(out.crop);
+  if ('rotate' in out) out.rotate = normalizeRotation(out.rotate);
+  for (const k of ['flipH', 'flipV', 'reverse']) if (k in out) out[k] = !!out[k];
+  if (out.freeze) {
+    const max = mediaMaxTime(project, out.mediaId);
+    out.freezeAt = clamp(Number(out.freezeAt) || 0, 0, Number.isFinite(max) ? Math.max(0, max - 1e-3) : Infinity);
+    out.reverse = false;
+  } else if ('freeze' in out) out.freeze = false;
+  if ('eq' in out && typeof out.eq !== 'string') out.eq = 'none';
+  return out;
+}
+
+/**
+ * Patch that moves a main-track clip's timeline edge ('in' = left, 'out' = right) to timeline time T, computed from
+ * the layout item as it was when the gesture started. A reversed clip's left edge is its source out-point.
+ */
+export function trimPatchAt(item, edge, T) {
+  const c = item.clip;
+  const speed = c.speed || 1;
+  if (c.reverse && !c.freeze) return edge === 'in' ? { out: c.in + (item.end - T) * speed } : { in: c.out - (T - item.start) * speed };
+  const src = c.in + (T - item.start) * speed;
+  return edge === 'in' ? { in: src } : { out: src };
+}
+
+/** Main-track layout item under timeline time t (the incoming clip during a transition), or the item of `clipId`. */
+function mainItemAt(project, t, clipId = null) {
+  const lay = layoutVideo(project.tracks.video);
+  if (clipId) return lay.find((it) => it.clip.id === clipId) || null;
+  const items = videoItemsAt(lay, t);
+  return items[items.length - 1] || null;
+}
+
+/**
+ * Cuts the main track at t inside `item` when there is room on both sides; returns {project, index} = where a clip
+ * inserted "at t" goes (before the clip when t is at its start, after it when t is at its end).
+ */
+function cutAt(project, item, t) {
+  const local = t - item.start;
+  if (local < MIN_CLIP_DURATION - EPS) return { project, index: item.index };
+  if (item.duration - local < MIN_CLIP_DURATION - EPS) return { project, index: item.index + 1 };
+  return { project: splitVideoAt(project, t, item.clip.id).project, index: item.index + 1 };
+}
+
+/**
+ * iMovie "Add Freeze Frame": splits the video clip under the playhead and inserts a still of that exact frame
+ * (`duration` seconds, same look / crop / framing as the clip) — no new media file. Returns {project, id} (id null
+ * when there is no video clip under t).
+ */
+export function insertFreezeFrame(project, t, { duration = DEFAULT_FREEZE_DURATION, clipId = null } = {}) {
+  let item = mainItemAt(project, t, clipId);
+  if (item && clipId && (t < item.start - EPS || t > item.end + EPS)) item = null;
+  const media = item && project.media[item.clip.mediaId];
+  if (!item || item.clip.freeze || !media || media.kind !== 'video') return { project, id: null };
+  const tt = clamp(t, item.start, Math.max(item.start, item.end - 1e-3));
+  const frame = sourceTimeAt(item, tt);
+  const cut = cutAt(project, item, tt);
+  const c = item.clip;
+  const still = {
+    ...JSON.parse(JSON.stringify(c)),
+    id: uid('clp'),
+    freeze: true,
+    freezeAt: frame,
+    in: 0,
+    out: Math.max(MIN_CLIP_DURATION, Number(duration) || DEFAULT_FREEZE_DURATION),
+    speed: 1,
+    reverse: false,
+    transition: null,
+    fadeIn: 0,
+    fadeOut: 0,
+    kenBurns: null,
+    autoOut: false,
+  };
+  return { project: insertVideoClips(cut.project, [still], cut.index), id: still.id };
+}
+
+/**
+ * iMovie "Instant Replay": the last `seconds` before t of the main-track clip (the selected `clipId`, or the clip
+ * under t) play again right after t at `rate` × the clip's speed. When t isn't inside the selected clip its end is
+ * used. Returns {project, id, start, duration} (id null when there is nothing to replay).
+ */
+export function instantReplay(project, t, { seconds = 2, rate = 0.5, clipId = null } = {}) {
+  const item = mainItemAt(project, t, clipId);
+  const media = item && project.media[item.clip.mediaId];
+  if (!item || item.clip.freeze || !media || media.kind !== 'video') return { project, id: null, start: 0, duration: 0 };
+  const tt = t > item.start + MIN_CLIP_DURATION - EPS && t < item.end - EPS ? t : item.end;
+  const l1 = tt - item.start;
+  const l0 = Math.max(0, l1 - Math.max(MIN_CLIP_DURATION, seconds));
+  if (l1 - l0 < MIN_CLIP_DURATION - EPS) return { project, id: null, start: 0, duration: 0 };
+  const c = item.clip;
+  const s = c.speed || 1;
+  const range = c.reverse ? { in: c.out - l1 * s, out: c.out - l0 * s } : { in: c.in + l0 * s, out: c.in + l1 * s };
+  const speed = clamp(s * rate, MIN_SPEED, MAX_SPEED);
+  const replay = { ...JSON.parse(JSON.stringify(c)), id: uid('clp'), ...range, speed, transition: null, fadeIn: 0, fadeOut: 0, autoOut: false, label: c.label ? `${c.label} (replay)` : '' };
+  const cut = cutAt(project, item, tt);
+  const p = insertVideoClips(cut.project, [replay], cut.index);
+  const it = layoutVideo(p.tracks.video).find((x) => x.clip.id === replay.id);
+  return { project: p, id: replay.id, start: it?.start ?? tt, duration: it?.duration ?? (range.out - range.in) / speed };
+}
+
+/** Rotates a main-track clip by a quarter turn (dir 1 = clockwise, -1 = counter-clockwise); the crop is kept. */
+export function rotateClip(project, clipId, dir = 1) {
+  const found = findClip(project, clipId);
+  if (!found) return project;
+  return updateClip(project, clipId, { rotate: normalizeRotation((found.clip.rotate || 0) + (dir < 0 ? -90 : 90)) });
 }
 
 // --- markers ---
@@ -834,9 +1273,11 @@ export function normalizeProject(raw) {
     id: raw.id || base.id,
     settings: { ...base.settings, ...(raw.settings || {}) },
     tracks: {
+      ...(raw.tracks && typeof raw.tracks === 'object' ? raw.tracks : {}), // keep unknown (newer) tracks
       video: Array.isArray(raw.tracks?.video) ? raw.tracks.video : [],
       audio: Array.isArray(raw.tracks?.audio) ? raw.tracks.audio : [],
       text: Array.isArray(raw.tracks?.text) ? raw.tracks.text : [],
+      overlay: Array.isArray(raw.tracks?.overlay) ? raw.tracks.overlay : [],
     },
     media: {},
     markers: Array.isArray(raw.markers) ? raw.markers : [],
@@ -856,6 +1297,7 @@ export function normalizeProject(raw) {
   p.tracks.video = fixFirstTransition(p.tracks.video.filter(known).map((c) => sanitizeVideoClip(p, { ...createVideoClip(p.media[c.mediaId]), ...c })));
   p.tracks.audio = p.tracks.audio.filter(known).map((c) => sanitizeAudioClip(p, { ...createAudioClip(p.media[c.mediaId]), ...c }));
   p.tracks.text = p.tracks.text.map((c) => ({ ...createTextClip(), ...c, style: { ...TEXT_STYLE_DEFAULTS, ...(c.style || {}) } }));
+  p.tracks.overlay = p.tracks.overlay.filter((c) => c && known(c) && p.media[c.mediaId].kind !== 'audio').map((c) => sanitizeOverlayClip(p, { ...createOverlayClip(p.media[c.mediaId]), ...c }));
   p.schema = SCHEMA_VERSION;
   return dedupeMedia(p);
 }
@@ -923,8 +1365,8 @@ export function mergeProjects(base, mine, theirs) {
   const mediaOrder = [...theirNew, ...(mine.mediaOrder || []).filter((id) => media[id])];
   for (const id of Object.keys(media)) if (!mediaOrder.includes(id)) mediaOrder.push(id);
   const known = (c) => !!media[c.mediaId];
-  const tracks = {};
-  for (const track of ['video', 'audio', 'text']) {
+  const tracks = { ...(mine.tracks || {}) };
+  for (const track of CLIP_TRACKS) {
     const chosen = same(mine.tracks?.[track], base.tracks?.[track]) ? theirs.tracks?.[track] || [] : mine.tracks?.[track] || [];
     tracks[track] = track === 'text' ? chosen : chosen.filter(known);
   }
@@ -936,6 +1378,7 @@ export function mergeProjects(base, mine, theirs) {
     bible: pick('bible'),
     markers: pick('markers'),
     exportSettings: pick('exportSettings'),
+    dialogue: pick('dialogue'),
     media,
     mediaOrder,
     tracks,
@@ -993,7 +1436,7 @@ export function dedupeMedia(project) {
     ...project,
     media,
     mediaOrder: [...new Set((project.mediaOrder || []).map(to))].filter((id) => media[id]),
-    tracks: { ...project.tracks, video: project.tracks.video.map(moveClip), audio: project.tracks.audio.map(moveClip) },
+    tracks: { ...project.tracks, video: project.tracks.video.map(moveClip), audio: project.tracks.audio.map(moveClip), overlay: (project.tracks.overlay || []).map(moveClip) },
     shots: (project.shots || []).map((sh) => {
       const moved = (Array.isArray(sh.takes) && sh.takes.some((id) => remap.has(id))) || remap.has(sh.chosenTake);
       if (!moved) return sh;

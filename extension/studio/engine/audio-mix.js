@@ -6,7 +6,8 @@
 //   * main-track clips with sound: placed at their timeline start, offset = clip.in, playbackRate = speed,
 //     gain = volume x fade in/out x equal-power crossfade across each transition window (the outgoing clip
 //     ramps down while the incoming one ramps up), plus a few-millisecond de-click ramp at hard cuts;
-//   * audio-track clips (music, voice, sfx — or the sound of a video): volume x fade in/out.
+//   * audio-track clips (music, voice, sfx — or the sound of a video): volume x fade in/out;
+//   * overlay-track clips with sound (picture in picture, cutaway…): like main-track clips, without transitions.
 // A look-ahead peak limiter then keeps the master below full scale (it leaves material that never clips
 // untouched — no make-up gain, no latency, so the mix matches the preview levels and stays in sync).
 //
@@ -19,6 +20,7 @@
 
 import { layoutProject } from '../core/model.js';
 import { clamp, formatTime, formatDuration } from '../core/utils.js';
+import { buildEqChain, duckWindows, duckFactorAt, duckBreakpoints, isDucker } from './audio-fx.js';
 
 export const DEFAULT_SAMPLE_RATE = 48000;
 /** Micro-fade (seconds) applied where a sound starts or stops abruptly, to avoid clicks. */
@@ -47,7 +49,7 @@ export function fadeGain(local, duration, fadeIn = 0, fadeOut = 0) {
 /** True when a main-track clip contributes sound (a video with an audio track, not muted, volume > 0). */
 export function mainClipAudible(project, clip) {
   const m = project.media?.[clip.mediaId];
-  if (!m || m.kind !== 'video' || m.hasAudio === false) return false;
+  if (!m || m.kind !== 'video' || m.hasAudio === false || clip.freeze) return false; // a freeze frame is silent
   return !clip.muted && (clip.volume ?? 1) > 0;
 }
 
@@ -62,7 +64,11 @@ export function audioClipAudible(project, clip) {
 export function hasAudibleContent(project, { start = 0, end = Infinity } = {}) {
   const lay = layoutProject(project);
   const overlaps = (it) => it.end > start && it.start < end;
-  return lay.video.some((it) => overlaps(it) && mainClipAudible(project, it.clip)) || lay.audio.some((it) => overlaps(it) && audioClipAudible(project, it.clip));
+  return (
+    lay.video.some((it) => overlaps(it) && mainClipAudible(project, it.clip)) ||
+    lay.audio.some((it) => overlaps(it) && audioClipAudible(project, it.clip)) ||
+    (lay.overlay || []).some((it) => overlaps(it) && mainClipAudible(project, it.clip))
+  );
 }
 
 /**
@@ -142,15 +148,23 @@ export function gainEnvelope(gainAt, breakpoints, { tolerance = 0.002, maxDepth 
 
 /**
  * The mix as a list of scheduled sources, relative to the render range start (pure).
- * @returns {Array<{mediaId:string, clipId:string, track:'video'|'audio', when:number, offset:number,
- *   duration:number, rate:number, envelope:Array<{t:number, v:number}>}>}
+ * @returns {Array<{mediaId:string, clipId:string, track:'video'|'audio'|'overlay', when:number, offset:number,
+ *   duration:number, rate:number, envelope:Array<{t:number, v:number}>, reverse:boolean, eq:string}>}
  *   when / envelope times: seconds from `start`; offset / duration: source-media seconds (buffer time).
+ *   reverse: play [offset, offset + duration) backwards (a reversed clip); eq: EQ preset id (engine/audio-fx.js).
+ *   Ducking (audio-track clips with `duck`) is folded into every other source's envelope.
  */
 export function buildMixPlan(project, { start = 0, end = Infinity, declick = DECLICK } = {}) {
   const lay = layoutProject(project);
   const stop = Math.min(end, lay.duration);
   const plan = [];
-  const add = (entry, gainAt, bps) => {
+  const ducks = duckWindows(project, lay);
+  const duckBps = duckBreakpoints(ducks);
+  const add = (entry, baseGainAt, baseBps) => {
+    // Every source but the ducking clips themselves follows the ducking envelope.
+    const ducked = ducks.length && !(entry.track === 'audio' && isDucker(project, entry.clip || {}));
+    const gainAt = ducked ? (t) => baseGainAt(t) * duckFactorAt(ducks, t) : baseGainAt;
+    const bps = ducked ? baseBps.concat(duckBps) : baseBps;
     const env = gainEnvelope(gainAt, bps.filter((x) => x >= entry.a - 1e-9 && x <= entry.b + 1e-9).concat([entry.a, entry.b]));
     if (!env.some((p) => p.v > 1e-5)) return; // silent all the way through
     plan.push({
@@ -162,6 +176,8 @@ export function buildMixPlan(project, { start = 0, end = Infinity, declick = DEC
       duration: entry.duration,
       rate: entry.rate,
       envelope: env.map((p) => ({ t: Math.max(0, p.t - start), v: p.v })),
+      reverse: !!entry.reverse,
+      eq: entry.clip?.eq || 'none',
     });
   };
 
@@ -176,8 +192,10 @@ export function buildMixPlan(project, { start = 0, end = Infinity, declick = DEC
     const bps = [item.start, item.start + declick, item.start + (clip.fadeIn || 0), item.end - (clip.fadeOut || 0), item.end - declick, item.end];
     if (item.transIn) bps.push(item.transIn.start, item.transIn.end);
     if (next?.transIn) bps.push(next.transIn.start, next.transIn.end);
+    // A reversed clip sounds its source backwards: timeline [a, b) plays source [out - (b - start) x speed, out - (a - start) x speed).
+    const offset = clip.reverse ? clip.out - (b - item.start) * speed : clip.in + (a - item.start) * speed;
     add(
-      { mediaId: clip.mediaId, clipId: clip.id, track: 'video', a, b, offset: clip.in + (a - item.start) * speed, duration: (b - a) * speed, rate: speed },
+      { mediaId: clip.mediaId, clipId: clip.id, clip, track: 'video', a, b, offset, duration: (b - a) * speed, rate: speed, reverse: !!clip.reverse },
       (t) => mainClipGainAt(item, next, t, { declick }),
       bps,
     );
@@ -191,8 +209,23 @@ export function buildMixPlan(project, { start = 0, end = Infinity, declick = DEC
     if (b - a <= 1e-6) continue;
     const bps = [item.start, item.start + declick, item.start + (clip.fadeIn || 0), item.end - (clip.fadeOut || 0), item.end - declick, item.end];
     add(
-      { mediaId: clip.mediaId, clipId: clip.id, track: 'audio', a, b, offset: clip.in + (a - item.start), duration: b - a, rate: 1 },
+      { mediaId: clip.mediaId, clipId: clip.id, clip, track: 'audio', a, b, offset: clip.in + (a - item.start), duration: b - a, rate: 1 },
       (t) => audioClipGainAt(item, t, { declick }),
+      bps,
+    );
+  }
+  // Overlay-track clips with sound (picture in picture, cutaway…): like a main-track clip without transitions.
+  for (const item of lay.overlay || []) {
+    const { clip } = item;
+    if (!mainClipAudible(project, clip)) continue;
+    const a = Math.max(item.start, start);
+    const b = Math.min(item.end, stop);
+    if (b - a <= 1e-6) continue;
+    const speed = clip.speed || 1;
+    const bps = [item.start, item.start + declick, item.start + (clip.fadeIn || 0), item.end - (clip.fadeOut || 0), item.end - declick, item.end];
+    add(
+      { mediaId: clip.mediaId, clipId: clip.id, clip, track: 'overlay', a, b, offset: clip.in + (a - item.start) * speed, duration: (b - a) * speed, rate: speed },
+      (t) => mainClipGainAt(item, null, t, { declick }),
       bps,
     );
   }
@@ -586,6 +619,21 @@ async function declaredAudioDuration(mediaId) {
   }
 }
 
+/** The [offset, offset + duration) source seconds of `buffer`, back to front, as a new AudioBuffer (a reversed clip). */
+function reversedSegment(ctx, buffer, offset, duration) {
+  const sr = buffer.sampleRate;
+  const s0 = Math.max(0, Math.floor(offset * sr));
+  const s1 = Math.min(buffer.length, Math.ceil((offset + duration) * sr));
+  const n = Math.max(1, s1 - s0);
+  const out = ctx.createBuffer(buffer.numberOfChannels, n, sr);
+  for (let c = 0; c < buffer.numberOfChannels; c++) {
+    const src = buffer.getChannelData(c);
+    const dst = out.getChannelData(c);
+    for (let i = 0; i < n && s0 + i < s1; i++) dst[i] = src[s1 - 1 - i];
+  }
+  return out;
+}
+
 /** The [offset, offset + duration) source seconds of `buffer`, time-stretched by `rate`, as a new AudioBuffer. */
 async function stretchedSegment(ctx, buffer, offset, duration, rate, run) {
   const sr = buffer.sampleRate;
@@ -685,6 +733,10 @@ export async function renderAudioMix(
     let buffer = buffers.get(src.mediaId);
     if (!buffer || src.offset >= buffer.duration - 1e-4) continue;
     let { offset, duration, rate } = src;
+    if (src.reverse) {
+      buffer = reversedSegment(ctx, buffer, offset, duration);
+      [offset, duration] = [0, buffer.duration];
+    }
     if (retimed(src)) {
       const work = duration / rate;
       buffer = await stretchedSegment(ctx, buffer, offset, duration, rate, (steps) =>
@@ -698,7 +750,12 @@ export async function renderAudioMix(
     node.playbackRate.value = rate;
     const gain = ctx.createGain();
     applyEnvelope(gain.gain, src.envelope);
-    node.connect(gain).connect(ctx.destination);
+    const eq = buildEqChain(ctx, src.eq);
+    if (eq) {
+      node.connect(eq.input);
+      eq.output.connect(gain);
+    } else node.connect(gain);
+    gain.connect(ctx.destination);
     node.start(src.when, offset, duration);
   }
   report(share.decode + share.stretch);

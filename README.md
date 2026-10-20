@@ -20,7 +20,11 @@ images ("ingredients").
   (read from Grok's own API responses).
 - Hover any Grok video for **+ Bin / Pick / Timeline / Ingredient** buttons, or right-click it, or "Add all" from the studio.
   Optional auto-collect of every new generation.
-- Bin with hover-scrub filmstrips, ratings, pick/reject flags, search, filters and sorting.
+- Bin with hover-scrub filmstrips, ratings, pick/reject flags, search, filters and sorting. Every take shows which
+  dialogue part (**P3**) or shot (**S5**) it was generated for.
+- **One-click delete**: hover a clip and click its trash icon, press `Del`, or use **Delete** in the source monitor and
+  review mode (it moves on to the next clip). No confirmation; the toast's **Undo** or `Ctrl+Z` brings it back.
+  The bin's clean-up menu deletes all rejected clips, everything not on the timeline, or failed downloads.
 - **Review mode** for fast triage with the keyboard (← → to browse, P pick, X reject, 1–5 rate, I/O mark, Enter add to timeline).
 - **Source monitor** with in/out marks, frame stepping, frame grabs, and **"Last frame → Grok"**, which attaches the final frame
   of a clip to the Grok composer so the next generation continues the shot.
@@ -31,11 +35,41 @@ images ("ingredients").
 - Per-clip speed, volume/mute, fit, colour looks and fine filters, fades, Ken Burns on stills.
 - Audio lanes: add music, voice or SFX from a **file or any URL**, or reuse another clip's sound; fades, volume, fit-to-video.
 - Text overlays with fonts, styles and animations (fade, slide-up, pop, typewriter).
+- **Clip tools**: reverse, freeze frame (`Shift+F`), instant replay (50 % / 25 % with a title), crop with aspect
+  presets, rotate 90°, flip, exposure / temperature / tint and **Auto enhance**.
+- **Audio tools**: EQ presets (voice, music, bass, treble, 50/60 Hz hum, background noise), **ducking** (an audio clip
+  lowers every other sound while it plays), and **voice-over recording** from the monitor's mic button (3-2-1 count-in,
+  recorded while the timeline plays, placed on a free lane with ducking on).
+- **Backgrounds** (solid colours, gradients) and 11 one-click **title styles** (lower third, cinematic letterbox,
+  subtitle, typewriter, end credits roll…).
+- **Overlay track (V2)**: picture in picture (corner presets, drag the box on the monitor, border, shadow, rounded
+  corners), cutaway, side by side (split screen) and green/blue screen (colour picker or eyedropper, tolerance,
+  softness, spill), with dissolve / zoom / slide entrances. Drop a clip on the V2 row or use “Add as overlay”.
 - Realtime preview; the export renders through the same compositor, so the result matches what you saw.
 
 **Export**
 - MP4 (H.264 + AAC, or Opus where the browser can't encode AAC) or WebM (VP9 + Opus), any resolution or frame rate,
   rendered offline frame by frame (WebCodecs via Mediabunny). Also a PNG of the current frame, or a WAV of the audio mix.
+
+**Quick phrases**
+- Keep the phrases you write in every prompt (“nobody speaks”, “camera angle from top”, “no music”…) as one-click chips
+  under each shot's prompt: click to add, click again to remove. Add your own with the inline field, or pick from a
+  prepared library of 100+ phrases in 10 categories (dialogue & voice, camera angle, movement, framing, acting,
+  continuity, sound, look, pace, quality).
+- **Phrase sets** apply several phrases at once (“Talking scene” = nobody speaks + static camera…).
+- Mark a phrase “start every new shot with it”, add/remove a phrase on every shot at once, import/export your list
+  (Library → **Phrases**).
+
+**Dialogue tab**
+- Paste a long dialogue (`NAME: line`, `(directions)`). It is split into parts that each fit one generated video
+  (6, 10, 15 s or any length, at a slow/normal/fast speaking pace), never cutting a line unless it is longer than a clip.
+- Edit parts as cards (move a line to the previous/next part, split, merge) or as one script where `---` starts a part.
+  A meter shows how full each part is.
+- A scene description, speaker voices / bible characters and phrases go into every part's prompt.
+- **Create shots**: one shot per part (“Part 3 · ALICE & BOB”), sent to Grok one by one or as a batch. Each generated
+  video stays linked to its part, so you always know which video says which lines.
+- **Assemble** puts the chosen take of every part on the timeline in dialogue order, and **Add subtitles** writes the
+  lines as timed captions over the clips.
 
 **Prompts tab**
 - Storyboard / shot list with a structured **prompt builder** (subject, action, setting, shot type, camera move, lens,
@@ -53,7 +87,7 @@ images ("ingredients").
 
 ## Install (developer mode)
 
-1. Download `grok-imagine-studio-1.0.0.zip` from the [latest release](https://github.com/bacem-gpt/grok-imagine-studio/releases/latest) and unzip it (or clone this repo and use the `extension/` folder). No build step is needed.
+1. Download `grok-imagine-studio-1.1.0.zip` from the [latest release](https://github.com/bacem-gpt/grok-imagine-studio/releases/latest) and unzip it (or clone this repo and use the `extension/` folder). No build step is needed.
 2. Open `chrome://extensions` (Chrome, Edge, Brave, Arc, Opera; Chrome 116 or later), enable **Developer mode**.
 3. Click **Load unpacked** and select the unzipped folder (the one containing `manifest.json`).
 4. Open (or reload) [grok.com/imagine](https://grok.com/imagine). A **STUDIO** tab appears on the right edge of the page.
@@ -67,7 +101,8 @@ images ("ingredients").
 2. Press **Review** in the Clips tab and triage with the keyboard (P pick, X reject, 1–5 rate). Mark in/out points on the keepers and press Enter to send them to the timeline. Press `?` in the Clips tab for every shortcut.
 3. In **Edit**, reorder, trim and split, click a junction to choose a transition, then add music (**Audio → From file / From URL**) and titles.
 4. Click **Export**, choose MP4 or WebM, and download, or add the render back to the bin.
-5. Need another shot? In **Prompts**, write or generate the next shot (attach a reference or the last frame), click **Send to Grok**, and the new take is linked to its shot.
+5. Need another shot? In **Prompts**, write or generate the next shot (attach a reference or the last frame), click quick phrases in, click **Send to Grok**, and the new take is linked to its shot.
+6. A long dialogue? Paste it in **Dialogue**, create one shot per part, send them, then **Assemble** and **Add subtitles**.
 
 The studio can dock right or bottom, fill the window, or pop out into its own tab (it then talks to your latest grok.com tab).
 
@@ -76,11 +111,11 @@ The studio can dock right or bottom, fill the window, or pop out into its own ta
 | Where | Keys |
 |---|---|
 | Anywhere on grok.com | `Alt+Shift+S` toggle the studio |
-| Studio | `Ctrl/⌘+Z` undo · `Ctrl/⌘+Shift+Z` redo · `Ctrl/⌘+E` export · `Alt+1…4` switch tabs |
-| Edit | `Space` play/pause · `J K L` shuttle · `←/→` frame (Shift = 1 s) · `↑/↓` previous/next edit · `S` split · `Del` delete · `Ctrl/⌘+D` duplicate · `T` text · `M` marker · `+/-` zoom |
+| Studio | `Ctrl/⌘+Z` undo · `Ctrl/⌘+Shift+Z` redo · `Ctrl/⌘+E` export · `Alt+1…5` switch tabs (Clips, Edit, Prompts, Dialogue, Ingredients) |
+| Edit | `Space` play/pause · `J K L` shuttle · `←/→` frame (Shift = 1 s) · `↑/↓` previous/next edit · `S` split · `Shift+F` freeze frame · `Del` delete · `Ctrl/⌘+D` duplicate · `T` text · `M` marker · `+/-` zoom |
 | Clips bin | arrows move · `Enter` open in source monitor · `P` pick · `X` reject · `U` unflag · `1–5` rate · `E` add to timeline · `W` insert at playhead · `R` review · `Del` remove |
 | Source monitor | `Space` play · `J K L` shuttle · `,` / `.` frame step · `I` / `O` mark in/out · `←/→` previous/next clip |
-| Review mode | `←/→` browse · `P` pick · `X` reject · `1–5` rate · `I/O` in/out · `Enter` add to timeline and go to the next item · `Esc` exit |
+| Review mode | `←/→` browse · `P` pick · `X` reject · `1–5` rate · `I/O` in/out · `Enter` add to timeline and go to the next item · `Del` delete and go to the next item · `Esc` exit |
 | Prompts | `Ctrl/⌘+Enter` send shot · `Ctrl/⌘+Shift+Enter` send and submit · `Alt+↑/↓` previous/next shot |
 
 ## Troubleshooting
@@ -90,6 +125,10 @@ The studio can dock right or bottom, fill the window, or pop out into its own ta
   URL, or download the file and drop it into the bin.
 - **MP4 audio is Opus, not AAC**: some browsers (Chrome on Linux) have no AAC encoder. The MP4 still plays in browsers, VLC
   and most editors. Use Chrome on Windows/macOS for AAC, or export WebM.
+- **Voice-over: microphone blocked inside grok.com**: use **Open in a tab** (the studio in its own tab can always ask for
+  the microphone).
+- **Reversed clips look choppy in the preview**: the preview steps through them frame by frame (sound is muted there);
+  the export is smooth and plays the sound backwards.
 - **Composer not found when sending prompts**: Grok changed its page. Use **Copy** instead, and please report it.
   Detection is heuristic, based on Grok's DOM and API in October 2026.
 

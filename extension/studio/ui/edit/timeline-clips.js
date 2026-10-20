@@ -26,7 +26,10 @@ function Filmstrip({ mediaId, media, clip, widthPx, height, zoom }) {
     return html`<div class="tl-strip" style=${`background-image:url("${previews.thumb}");background-size:auto 100%;background-repeat:repeat-x`}></div>`;
   }
   const tileW = Math.max(24, Math.round((height * 128) / 72));
-  const tiles = filmstripTiles({ widthPx, tileW, zoom, clipIn: clip.in, speed: clip.speed, mediaDuration: media.duration, stripCount: previews.stripCount });
+  // A reversed clip runs from its out-point backwards; a freeze frame repeats one frame.
+  const from = clip.freeze ? clip.freezeAt || 0 : clip.reverse ? clip.out : clip.in;
+  const rate = clip.freeze ? 1e-9 : (clip.speed || 1) * (clip.reverse ? -1 : 1);
+  const tiles = filmstripTiles({ widthPx, tileW, zoom, clipIn: from, speed: rate, mediaDuration: media.duration, stripCount: previews.stripCount });
   const bg = `background-image:url("${previews.strip}");background-size:${previews.stripCount * tileW}px ${height}px`;
   return html`<div class="tl-strip">
     ${tiles.map((tile) => html`<div class="tl-tile" key=${tile.x} style=${`${bg};left:${tile.x}px;width:${tileW}px;background-position:${-tile.index * tileW}px 0`}></div>`)}
@@ -59,6 +62,9 @@ export function VideoClipView({ item, media, zoom, top, height, selected, shift 
   if (Math.abs((clip.speed || 1) - 1) > 1e-3) badges.push(html`<span class="tl-badge" title="Speed">${+(clip.speed || 1).toFixed(2)}×</span>`);
   if (!filtersAreNeutral(clip.filters)) badges.push(html`<span class="tl-badge tl-badge-icon" title="Color filter"><${Icon} name="palette" size=${11} /></span>`);
   if (clip.kenBurns && !isImage) badges.push(html`<span class="tl-badge tl-badge-icon" title="Ken Burns motion"><${Icon} name="zoom-in" size=${11} /></span>`);
+  if (clip.reverse) badges.push(html`<span class="tl-badge tl-badge-icon" title="Reversed"><${Icon} name="rewind" size=${11} /></span>`);
+  if (clip.freeze) badges.push(html`<span class="tl-badge tl-badge-icon" title="Freeze frame"><${Icon} name="snowflake" size=${11} /></span>`);
+  if (clip.crop || clip.rotate || clip.flipH || clip.flipV) badges.push(html`<span class="tl-badge tl-badge-icon" title="Cropped / rotated"><${Icon} name="crop" size=${11} /></span>`);
   if (clip.muted && media?.kind === 'video') badges.push(html`<span class="tl-badge tl-badge-icon" title="Muted"><${Icon} name="volume-x" size=${11} /></span>`);
   return html`<div
     class=${cx('tl-clip', 'tl-clip-video', isImage && 'is-image', selected && 'is-selected', dragging && 'is-dragging', offline && 'is-error', widthPx < 30 && 'is-tiny')}
@@ -233,4 +239,44 @@ export function TransitionBadge({ item, zoom, top, height, shift = 0, active, on
   >
     <${Icon} name="plus" size=${11} />
   </button>`;
+}
+
+const OVERLAY_MODE_BADGE = { pip: ['pip', 'Picture in picture'], cutaway: ['film', 'Cutaway'], split: ['split-v', 'Side by side'], greenscreen: ['layers', 'Green/blue screen'] };
+
+/** Overlay-track clip (V2…): filmstrip like the main track, free-positioned, with its overlay mode as a badge. */
+export function OverlayClipView({ item, media, zoom, top, height, selected, onPointerDown, onContextMenu, onTrimDown, onFadeDown, onDblClick }) {
+  const clip = item.clip;
+  const left = item.start * zoom;
+  const widthPx = Math.max(3, item.duration * zoom);
+  const name = clipName(clip, media);
+  const offline = media?.status === 'error';
+  const [modeIcon, modeName] = OVERLAY_MODE_BADGE[clip.mode] || OVERLAY_MODE_BADGE.pip;
+  const badges = [];
+  if (Math.abs((clip.speed || 1) - 1) > 1e-3) badges.push(html`<span class="tl-badge" title="Speed">${+(clip.speed || 1).toFixed(2)}×</span>`);
+  if (!filtersAreNeutral(clip.filters)) badges.push(html`<span class="tl-badge tl-badge-icon" title="Color filter"><${Icon} name="palette" size=${11} /></span>`);
+  if (clip.muted && media?.kind === 'video') badges.push(html`<span class="tl-badge tl-badge-icon" title="Muted"><${Icon} name="volume-x" size=${11} /></span>`);
+  return html`<div
+    class=${cx('tl-clip', 'tl-clip-overlay', media?.kind === 'image' && 'is-image', selected && 'is-selected', offline && 'is-error', widthPx < 30 && 'is-tiny')}
+    style=${`left:${left}px;width:${widthPx}px;top:${top}px;height:${height}px`}
+    data-clip-id=${clip.id}
+    data-track="overlay"
+    data-mode=${clip.mode || 'pip'}
+    title=${`${name} · ${modeName} · ${formatDuration(item.duration)}${offline ? ' · Media offline — retry it in the bin' : ''}`}
+    onPointerDown=${onPointerDown}
+    onContextMenu=${onContextMenu}
+    onDblClick=${onDblClick}
+  >
+    <${Filmstrip} mediaId=${clip.mediaId} media=${media} clip=${clip} widthPx=${widthPx} height=${height - 2} zoom=${zoom} />
+    <${FadeShapes} fadeIn=${clip.fadeIn} fadeOut=${clip.fadeOut} zoom=${zoom} widthPx=${widthPx} />
+    ${widthPx > 24 &&
+    html`<div class="tl-clip-top">
+      <span class="tl-ov-mode" title=${modeName}><${Icon} name=${modeIcon} size=${11} /></span>
+      ${widthPx > 44 && html`<span class="tl-clip-name">${name}</span>`}
+      ${widthPx > 100 && badges}
+      ${widthPx > 140 && html`<span class="tl-clip-dur">${formatDuration(item.duration)}</span>`}
+    </div>`}
+    ${selected && html`<${FadeHandles} fadeIn=${clip.fadeIn} fadeOut=${clip.fadeOut} zoom=${zoom} widthPx=${widthPx} onFadeDown=${onFadeDown} />`}
+    <div class="tl-trim tl-trim-in" title="Drag to trim the start" onPointerDown=${(e) => onTrimDown(e, 'in')}></div>
+    <div class="tl-trim tl-trim-out" title="Drag to trim the end" onPointerDown=${(e) => onTrimDown(e, 'out')}></div>
+  </div>`;
 }

@@ -59,7 +59,7 @@ const stripSaveMeta = (p) => {
   const { saveId, savedBy, ...rest } = p;
   return rest;
 };
-const LIBRARY_LISTS = ['snippets', 'presets', 'ingredients', 'templates'];
+const LIBRARY_LISTS = ['snippets', 'presets', 'ingredients', 'templates', 'phrases', 'phraseSets'];
 const libraryDoc = (lib) => {
   const { loaded, ...rest } = lib;
   return rest;
@@ -769,12 +769,12 @@ export async function initApp() {
   projectStore.subscribe((p) => {
     if (!p) return;
     const needs = (c) => c.autoOut && p.media[c.mediaId]?.status === 'ready' && p.media[c.mediaId].duration > 0;
-    if (!p.tracks.video.some(needs) && !p.tracks.audio.some(needs)) return;
+    if (!p.tracks.video.some(needs) && !p.tracks.audio.some(needs) && !(p.tracks.overlay || []).some(needs)) return;
     queueMicrotask(() =>
       projectStore.update(
         (q) => {
           let r = q;
-          for (const c of [...q.tracks.video, ...q.tracks.audio]) {
+          for (const c of [...q.tracks.video, ...q.tracks.audio, ...(q.tracks.overlay || [])]) {
             const m = q.media[c.mediaId];
             if (c.autoOut && m?.status === 'ready' && m.duration > 0) r = M.updateClip(r, c.id, { out: m.duration });
           }

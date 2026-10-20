@@ -201,6 +201,7 @@ export function EditView({ active }) {
       'mod+a': k(() => A.selectAll()),
       t: k(() => A.addTextAt(session, session.time())),
       m: k(() => A.addMarkerAt(session.time())),
+      'shift+f': k(() => A.freezeFrame(session)),
       '+': zoom(1),
       '=': zoom(1),
       '-': zoom(-1),

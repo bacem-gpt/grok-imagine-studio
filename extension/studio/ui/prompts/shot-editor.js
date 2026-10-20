@@ -13,6 +13,7 @@ import { mentionFor, insertAt, createSnippet, upsertSnippet, addBibleEntry, snip
 import { DURATION_OPTIONS, SHOT_MODES } from '../../prompts/presets.js';
 import { PrSection, ShotStatus, useCommittedText, AutoTextarea, useExpandCtx, useShotInBox } from './common.js';
 import { PromptBuilder } from './prompt-builder.js';
+import { PhraseBoard } from './phrases.js';
 import { ReferencesSection } from './refs.js';
 import { TakesSection } from './takes.js';
 import { VariationsSection } from './variations-panel.js';
@@ -352,6 +353,7 @@ export function ShotEditor({ layout }) {
     <${EditorHeader} shot=${shot} index=${index} total=${total} layout=${layout} />
     <div class="panel-body pr-editor-body">
       <${PromptField} shot=${shot} index=${index} />
+      <${PhraseBoard} shot=${shot} />
       <${ReferencesSection} shot=${shot} />
       <${PromptBuilder} shot=${shot} />
       <${TakesSection} shot=${shot} />

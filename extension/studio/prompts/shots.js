@@ -320,17 +320,19 @@ export function syncTakes(project) {
 }
 
 /**
- * Media ids for the sequence, in shot order: each shot's chosen (or first) usable take.
+ * Media ids for the sequence, in shot order (or in opts.order): each shot's chosen (or first) usable take.
  * @returns {{mediaIds: string[], used: Array<{shotId, mediaId, fallback: boolean}>, skipped: string[], failed: string[]}}
  *   skipped = shot ids without a usable take; failed = the skipped shots whose takes all failed to download;
  *   used[].fallback = the chosen take failed, another take is used instead.
  */
-export function takesInShotOrder(project, { approvedOnly = false, shotIds = null } = {}) {
+export function takesInShotOrder(project, { approvedOnly = false, shotIds = null, order = null } = {}) {
   const only = shotIds ? new Set(shotIds) : null;
   const used = [];
   const skipped = [];
   const failed = [];
-  for (const shot of getShots(project)) {
+  // `order`: shot ids to use in that order (e.g. dialogue parts) instead of the shot list order.
+  const list = order ? order.map((id) => findShot(project, id)).filter(Boolean) : getShots(project);
+  for (const shot of list) {
     if (only && !only.has(shot.id)) continue;
     if (approvedOnly && shot.status !== 'approved') continue;
     const mediaId = effectiveTake(project, shot);
@@ -349,8 +351,8 @@ export function takesInShotOrder(project, { approvedOnly = false, shotIds = null
  * opts.replace clears the main track first; opts.transition ({type, duration}) goes between clips.
  * @returns {{project, clipIds: string[], used: Array<{shotId, mediaId, fallback}>, skipped: string[], failed: string[]}}
  */
-export function assembleTimeline(project, { replace = false, transition = null, approvedOnly = false, shotIds = null } = {}) {
-  const { mediaIds, used, skipped, failed } = takesInShotOrder(project, { approvedOnly, shotIds });
+export function assembleTimeline(project, { replace = false, transition = null, approvedOnly = false, shotIds = null, order = null } = {}) {
+  const { mediaIds, used, skipped, failed } = takesInShotOrder(project, { approvedOnly, shotIds, order });
   if (!mediaIds.length) return { project, clipIds: [], used, skipped, failed };
   let p = project;
   if (replace && p.tracks.video.length) p = M.removeClips(p, p.tracks.video.map((c) => c.id));

@@ -407,7 +407,7 @@ export function walkStep(list, at, dir, alive) {
 export function placeholderFixes(project) {
   const fixes = [];
   if (!project?.tracks) return fixes;
-  for (const track of ['video', 'audio']) {
+  for (const track of ['video', 'audio', 'overlay']) {
     for (const clip of project.tracks[track] || []) {
       if (!clip.autoOut) continue;
       const m = project.media[clip.mediaId];
@@ -431,7 +431,7 @@ export function mediaUsageCounts(project) {
   let counts = usageCache.get(key);
   if (!counts) {
     counts = new Map();
-    for (const track of ['video', 'audio']) for (const c of key[track] || []) counts.set(c.mediaId, (counts.get(c.mediaId) || 0) + 1);
+    for (const track of ['video', 'audio', 'overlay']) for (const c of key[track] || []) counts.set(c.mediaId, (counts.get(c.mediaId) || 0) + 1);
     usageCache.set(key, counts);
   }
   return counts;

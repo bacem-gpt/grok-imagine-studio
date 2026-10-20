@@ -558,8 +558,8 @@ async function processMedia(id, { blob = null, urls = [], kindHint = null, refet
       projectStore.update(
         (p) => {
           let q = p;
-          for (const track of ['video', 'audio']) {
-            for (const c of p.tracks[track]) {
+          for (const track of ['video', 'audio', 'overlay']) {
+            for (const c of p.tracks[track] || []) {
               if (c.mediaId !== id) continue;
               if (c.autoOut) q = M.updateClip(q, c.id, { out: meta.duration }); // updateClip clears autoOut
               else if (c.out > meta.duration + 1e-3) q = M.updateClip(q, c.id, { out: meta.duration });

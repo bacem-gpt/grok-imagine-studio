@@ -103,13 +103,14 @@ export async function routeGrok(context, { pages = {}, csp = GROK_CSP, apiPosts 
  * Launches a persistent Chromium context with the extension loaded and mock routes installed.
  * Returns {context, extensionId, page, close}.
  */
-export async function launch({ headless = !process.env.HEADED, viewport = { width: 1440, height: 900 }, grok = {}, assets = {} } = {}) {
+export async function launch({ headless = !process.env.HEADED, viewport = { width: 1440, height: 900 }, grok = {}, assets = {}, args: extraArgs = [] } = {}) {
   const userDataDir = mkdtempSync(join(tmpdir(), 'gis-e2e-'));
   const context = await chromium.launchPersistentContext(userDataDir, {
     channel: 'chromium',
     headless,
     viewport,
-    args: [`--disable-extensions-except=${EXTENSION_DIR}`, `--load-extension=${EXTENSION_DIR}`, '--autoplay-policy=no-user-gesture-required'],
+    // extraArgs: e.g. Chrome's fake microphone (--use-fake-device-for-media-stream --use-fake-ui-for-media-stream)
+    args: [`--disable-extensions-except=${EXTENSION_DIR}`, `--load-extension=${EXTENSION_DIR}`, '--autoplay-policy=no-user-gesture-required', ...extraArgs],
   });
   await routeAssets(context, assets);
   await routeGrok(context, grok);

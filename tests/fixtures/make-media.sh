@@ -27,6 +27,8 @@ if [ ! -f clip-noaudio.mp4 ]; then echo "making clip-noaudio.mp4"; $FF -f lavfi 
 if [ ! -f clip-cyan.webm ]; then echo "making clip-cyan.webm"; $FF -f lavfi -i "color=c=cyan:s=640x360:r=30:d=3" -f lavfi -i "sine=frequency=990:sample_rate=48000:duration=3" -c:v libvpx-vp9 -b:v 300k -deadline realtime -cpu-used 8 -c:a libopus -b:a 64k -shortest clip-cyan.webm; fi
 if [ ! -f music.mp3 ]; then echo "making music.mp3"; $FF -f lavfi -i "aevalsrc=0.3*sin(2*PI*(220+110*floor(mod(t\,4)))*t)|0.3*sin(2*PI*(330+55*floor(mod(t\,2)))*t):s=44100:d=12" -c:a libmp3lame -b:a 128k music.mp3; fi
 if [ ! -f voice.wav ]; then echo "making voice.wav"; $FF -f lavfi -i "sine=frequency=300:sample_rate=48000:duration=3" -ac 1 voice.wav; fi
+# Brightness ramp (grey level = 60 x seconds): which source time a frame shows can be read off its pixels (clip tools).
+if [ ! -f clip-ramp.mp4 ]; then echo "making clip-ramp.mp4"; $FF -f lavfi -i "color=c=black:s=640x360:r=30:d=4" -vf "geq=lum='16+T*55':cb=128:cr=128,format=yuv420p" -c:v libx264 -preset veryfast -crf 18 -g 30 -movflags +faststart clip-ramp.mp4; fi
 if [ ! -f still.jpg ]; then echo "making still.jpg"; $FF -f lavfi -i "testsrc2=s=1024x1024:d=1" -frames:v 1 still.jpg; fi
 if [ ! -f still.png ]; then echo "making still.png"; $FF -f lavfi -i "gradients=s=800x600:d=1" -frames:v 1 still.png; fi
 for c in red green blue vertical hd; do

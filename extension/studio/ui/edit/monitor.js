@@ -9,10 +9,12 @@ import * as M from '../../core/model.js';
 import { getMediaUrl, getMediaBlob, getAudioBuffer } from '../../core/media.js';
 import { formatTime } from '../../core/utils.js';
 import { Player } from '../../engine/player.js';
-import { useProject, useElementSize } from '../hooks.js';
+import { useProject, useElementSize, useStore } from '../hooks.js';
 import { useHotkeys, comboLabel } from '../hotkeys.js';
 import { Icon, IconButton, showMenu, toast, cx } from '../kit.js';
 import * as A from './actions.js';
+import { VoiceOverOverlay, voiceOverMenu, voiceOverStore } from './voiceover.js';
+import { MonitorOverlayHandles } from './overlay-handles.js';
 
 /** Monitor width at or below which the transport is compacted (keep in sync with `@container mon` in edit.css). */
 const COMPACT_W = 600;
@@ -80,8 +82,9 @@ export function ProgramMonitor({ session, active }) {
   const [stageRef, stage] = useElementSize();
   const settings = useProject((p) => p.settings);
   const duration = useProject((p) => M.sequenceDuration(p));
-  const hasPicture = useProject((p) => p.tracks.video.length + p.tracks.text.length > 0);
+  const hasPicture = useProject((p) => p.tracks.video.length + p.tracks.text.length + (p.tracks.overlay || []).length > 0);
   const [st, setSt] = useState(session.state);
+  const recording = useStore(voiceOverStore, (s) => s.phase !== 'idle');
   const [expanded, setExpanded] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [volOpen, setVolOpen] = useState(false);
@@ -226,6 +229,7 @@ export function ProgramMonitor({ session, active }) {
   return html`<div class=${cx('mon', expanded && 'is-expanded', fullscreen && 'is-fullscreen')} ref=${wrapRef}>
     <div class="mon-stage" ref=${stageRef} onClick=${onStageClick} onDblClick=${onStageDblClick}>
       <canvas ref=${canvasRef} class="mon-canvas" width="2" height="2" style=${`width:${dispW}px;height:${dispH}px`} aria-label="Sequence preview"></canvas>
+      <${MonitorOverlayHandles} session=${session} dispW=${dispW} dispH=${dispH} active=${active} />
       ${!hasPicture &&
       html`<div class="mon-empty">
         <${Icon} name="play2" size=${28} />
@@ -234,6 +238,7 @@ export function ProgramMonitor({ session, active }) {
       </div>`}
       ${shuttle && html`<div class="mon-rate">${st.rate > 0 ? '▶▶' : '◀◀'} ${Math.abs(st.rate)}×</div>`}
       ${st.loop && html`<div class="mon-loop-badge" title="Looping"><${Icon} name="repeat" size=${11} /> Loop</div>`}
+      <${VoiceOverOverlay} session=${session} />
     </div>
     <div class="mon-transport">
       <div class="mon-time" title="Current time / sequence duration">
@@ -282,6 +287,14 @@ export function ProgramMonitor({ session, active }) {
           <${VolumeRange} st=${st} session=${session} klass="mon-vol" />
           ${compact && volOpen && html`<${VolumePopover} st=${st} session=${session} onClose=${closeVol} />`}
         </div>
+        <${IconButton}
+          icon="mic"
+          size="sm"
+          class=${cx('mon-mic', recording && 'is-recording')}
+          title=${recording ? 'Stop recording the voice-over' : 'Record a voice-over from the playhead'}
+          active=${recording}
+          onClick=${(e) => voiceOverMenu(e, session)}
+        />
         <${IconButton} icon="camera" size="sm" title="Grab this frame (bin, ingredient, PNG…)" disabled=${!hasPicture} onClick=${grabMenu} />
         <${IconButton} icon=${fullscreen || expanded ? 'minimize' : 'maximize'} size="sm" title=${fullscreen || expanded ? 'Exit full screen (Esc)' : 'Full screen (F)'} onClick=${toggleFullscreen} />
       </div>

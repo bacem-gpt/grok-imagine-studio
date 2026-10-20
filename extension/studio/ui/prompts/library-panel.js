@@ -7,6 +7,7 @@ import { copyText } from '../../core/utils.js';
 import { createSnippet, upsertSnippet, removeSnippet, filterSnippets, allTags, snippetToken, STARTER_SNIPPETS } from '../../prompts/library.js';
 import { BibleTab } from './bible-tab.js';
 import { TemplatesTab } from './templates-tab.js';
+import { PhrasesTab } from './phrases.js';
 import { prefsStore, setPrefs, insertIntoPrompt, openPaste, importFromPage, exportShots, copyAllPrompts } from './state.js';
 
 const setSnippets = (fn) => libraryStore.set((s) => ({ ...s, snippets: fn(s.snippets || []) }));
@@ -126,6 +127,7 @@ function ImportTab() {
 }
 
 const TABS = [
+  { id: 'phrases', label: 'Phrases', icon: 'hash', title: 'Quick phrases: one-click texts for your prompts' },
   { id: 'snippets', label: 'Snippets', icon: 'quote', title: 'Snippets: prepared texts you reuse in prompts' },
   { id: 'bible', label: 'Bible', icon: 'book', title: 'Characters, locations, style guide' },
   { id: 'templates', label: 'Templates', icon: 'wand', title: 'Meta-prompts that ask Grok to write material' },
@@ -135,12 +137,14 @@ const TABS = [
 export function LibraryPanel({ layout }) {
   const tab = useStore(prefsStore, (p) => p.libraryTab);
   const snippetCount = useLibrary((l) => (l.snippets || []).length);
-  const tabs = TABS.map((t) => ({ ...t, badge: t.id === 'snippets' ? snippetCount || null : null }));
+  const phraseCount = useLibrary((l) => (l.phrases || []).length);
+  const tabs = TABS.map((t) => ({ ...t, badge: t.id === 'snippets' ? snippetCount || null : t.id === 'phrases' ? phraseCount || null : null }));
   return html`<aside class=${cx('pr-lib', 'panel', layout && `is-${layout}`)} aria-label="Prompt library">
     <div class="panel-header pr-lib-head">
       <${Tabs} tabs=${tabs} value=${tab} onChange=${(v) => setPrefs({ libraryTab: v })} class="pr-lib-tabs" />
     </div>
     <div class="pr-lib-body">
+      ${tab === 'phrases' && html`<${PhrasesTab} />`}
       ${tab === 'snippets' && html`<${SnippetsTab} />`}
       ${tab === 'bible' && html`<${BibleTab} />`}
       ${tab === 'templates' && html`<${TemplatesTab} />`}

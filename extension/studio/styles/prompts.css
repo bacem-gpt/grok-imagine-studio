@@ -1532,7 +1532,7 @@ textarea.pr-prompt:focus {
 }
 .pr-lib-tabs .tab {
   height: 28px;
-  padding: 0 7px;
+  padding: 0 6px;
   gap: 4px;
   font-size: 12px;
 }
@@ -2261,4 +2261,218 @@ textarea.pr-paste-text {
 }
 .pr-takes-hint.is-warn {
   color: var(--warn);
+}
+
+/* ---------------------------------------------------------------------------------------------------------
+   Quick phrases (phrases.js): board under the prompt, phrase library modal, Library → Phrases
+   --------------------------------------------------------------------------------------------------------- */
+.pr-phrases {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.pr-phrases-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pr-phrase-cats {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0 -2px;
+  padding: 0 2px;
+}
+.pr-phrase-cats::-webkit-scrollbar {
+  display: none;
+}
+.pr-phrase-cat {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.pr-phrase-cat:hover {
+  background: var(--bg-2);
+  color: var(--text-0);
+}
+.pr-phrase-cat.is-active {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+.pr-phrase-cat-n {
+  color: var(--text-3);
+  font-size: 10px;
+}
+.pr-phrase-sets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.chip.pr-set-chip {
+  border-style: dashed;
+}
+.chip.pr-set-chip.is-active {
+  border-style: solid;
+}
+.chip.pr-phrase {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chip.pr-phrase.is-auto::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  margin-left: 1px;
+  border-radius: 50%;
+  background: #ffd166;
+  flex: none;
+}
+.pr-phrase-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 23px;
+  padding: 0 8px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 999px;
+  color: var(--text-3);
+  min-width: 150px;
+  flex: 1 1 150px;
+  max-width: 260px;
+}
+.pr-phrase-add:focus-within {
+  border-color: var(--accent);
+  color: var(--text-1);
+}
+.pr-phrase-add input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-0);
+  font: inherit;
+  font-size: 12px;
+}
+.pr-phrase-newrow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.pr-phrase-newrow .pr-phrase-add {
+  max-width: none;
+  height: 28px;
+  border-radius: var(--radius);
+}
+.pr-phrase-newrow .select {
+  flex: none;
+  max-width: 45%;
+}
+.pr-phrase-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.pr-phrase-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 28px;
+  padding: 0 2px 0 0;
+  border-radius: 6px;
+}
+.pr-phrase-row:hover {
+  background: var(--bg-2);
+}
+.pr-phrase-row .icon-btn {
+  opacity: 0;
+}
+.pr-phrase-row:hover .icon-btn,
+.pr-phrase-row .icon-btn:focus-visible,
+.pr-phrase-row .icon-btn.is-active {
+  opacity: 1;
+}
+.pr-phrase-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.pr-phrase-row-text span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pr-phrase-row-text.is-on {
+  color: #e3deff;
+}
+.pr-phrase-row-text:disabled {
+  cursor: default;
+}
+.pr-phrase-setlist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pr-phrase-setrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 2px 0 6px;
+  border-radius: 6px;
+  color: var(--text-2);
+}
+.pr-phrase-setrow:hover {
+  background: var(--bg-2);
+}
+.pr-phrase-setname {
+  color: var(--text-0);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pr-prepared {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pr-prepared .pr-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.pr-prepared-head {
+  align-items: center;
+}
+.pr-prepared-toggle {
+  margin-top: 6px;
+}
+.pr-modal-lead {
+  margin: 0 0 10px;
+}
+.pr-phrase-modal .modal-body {
+  max-height: min(70vh, 640px);
+  overflow: auto;
 }

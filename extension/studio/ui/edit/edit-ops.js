@@ -24,19 +24,21 @@ export function moveVideoClips(project, ids, toIndex) {
   return setVideoTrack(project, next);
 }
 
-/** Selected clips as a clipboard payload {video: [clip], audio: [clip], text: [clip], base} (deep copies). */
+/** Selected clips as a clipboard payload {video: [clip], audio: [clip], text: [clip], overlay: [clip], base} (deep copies). */
 export function copyClips(project, ids) {
   const set = new Set(ids);
   const lay = M.layoutProject(project);
   const video = lay.video.filter((it) => set.has(it.clip.id));
   const audio = project.tracks.audio.filter((c) => set.has(c.id));
   const text = project.tracks.text.filter((c) => set.has(c.id));
-  const starts = [...video.map((it) => it.start), ...audio.map((c) => c.start), ...text.map((c) => c.start)];
+  const overlay = (project.tracks.overlay || []).filter((c) => set.has(c.id));
+  const starts = [...video.map((it) => it.start), ...audio.map((c) => c.start), ...text.map((c) => c.start), ...overlay.map((c) => c.start)];
   if (!starts.length) return null;
   return {
     video: video.map((it) => structuredClone(it.clip)),
     audio: audio.map((c) => structuredClone(c)),
     text: text.map((c) => structuredClone(c)),
+    overlay: overlay.map((c) => structuredClone(c)),
     base: Math.min(...starts),
   };
 }
@@ -77,13 +79,22 @@ export function pasteClips(project, clipboard, t) {
     p = r.project;
     ids.push(r.id);
   }
+  for (const c of clipboard.overlay || []) {
+    if (!p.media[c.mediaId]) continue;
+    const start = Math.max(0, t + (c.start - base));
+    const spans = (p.tracks.overlay || []).map((o) => ({ ...o, duration: M.clipDuration(o) }));
+    const lane = placeLane(spans, c, start, start + M.clipDuration(c));
+    const r = M.addOverlayClip(p, c.mediaId, { ...structuredClone(c), id: uid('ovl'), start, lane });
+    p = r.project;
+    if (r.id) ids.push(r.id);
+  }
   return { project: p, ids };
 }
 
 /** Whether a main-track clip's sound can be detached onto an audio lane (video with sound, 1x speed). */
 export function canDetachAudio(project, clip) {
   const m = project.media[clip?.mediaId];
-  return !!m && m.kind === 'video' && m.hasAudio !== false && Math.abs((clip.speed || 1) - 1) < 1e-6;
+  return !!m && m.kind === 'video' && m.hasAudio !== false && Math.abs((clip.speed || 1) - 1) < 1e-6 && !clip.reverse && !clip.freeze;
 }
 
 /**
@@ -118,13 +129,17 @@ export function trimEdgeTo(project, clipId, edge, t) {
   if (found.track === 'video') {
     const item = M.layoutVideo(project.tracks.video).find((it) => it.clip.id === clipId);
     if (!item || t <= item.start + M.MIN_CLIP_DURATION / 2 || t >= item.end - M.MIN_CLIP_DURATION / 2) return project;
-    const src = item.clip.in + (t - item.start) * (item.clip.speed || 1);
-    return M.trimVideoClip(project, clipId, edge, src);
+    return M.updateClip(project, clipId, M.trimPatchAt(item, edge, t)); // (a reversed clip's left edge is its out-point)
   }
   if (found.track === 'audio') {
     const c = found.clip;
     if (t <= c.start || t >= c.start + M.audioClipDuration(c)) return project;
     return M.trimAudioClip(project, clipId, edge, t);
+  }
+  if (found.track === 'overlay') {
+    const c = found.clip;
+    if (t <= c.start || t >= c.start + M.clipDuration(c)) return project;
+    return M.trimOverlayClip(project, clipId, edge, t);
   }
   const c = found.clip;
   if (t <= c.start || t >= c.start + c.duration) return project;
@@ -205,6 +220,7 @@ export function clipsAt(project, t) {
   for (const it of M.videoItemsAt(lay.video, t)) res.push({ track: 'video', clip: it.clip });
   for (const it of lay.audio) if (t >= it.start && t < it.end) res.push({ track: 'audio', clip: it.clip });
   for (const it of lay.text) if (t >= it.start && t < it.end) res.push({ track: 'text', clip: it.clip });
+  for (const it of lay.overlay) if (t >= it.start && t < it.end) res.push({ track: 'overlay', clip: it.clip });
   return res;
 }
 
@@ -212,7 +228,7 @@ export function clipsAt(project, t) {
 export function selectionRange(project, ids) {
   const set = new Set(ids);
   const lay = M.layoutProject(project);
-  const spans = [...lay.video, ...lay.audio, ...lay.text].filter((it) => set.has(it.clip.id));
+  const spans = [...lay.video, ...lay.audio, ...lay.text, ...lay.overlay].filter((it) => set.has(it.clip.id));
   if (!spans.length) return null;
   return { start: Math.min(...spans.map((s) => s.start)), end: Math.max(...spans.map((s) => s.end)) };
 }
@@ -299,7 +315,7 @@ export function moveMarker(project, markerId, t) {
 export const audioTrimFloor = (clip) => Math.max(0, clip.start - clip.in);
 
 /** All clip ids in the project, main track first. */
-export const allClipIds = (project) => [...project.tracks.video, ...project.tracks.audio, ...project.tracks.text].map((c) => c.id);
+export const allClipIds = (project) => [...project.tracks.video, ...project.tracks.audio, ...project.tracks.text, ...(project.tracks.overlay || [])].map((c) => c.id);
 
 /** Short summary numbers for the inspector's sequence panel. */
 export function sequenceStats(project) {
@@ -311,7 +327,197 @@ export function sequenceStats(project) {
     transitions: lay.video.filter((it) => it.transIn).length,
     audio: project.tracks.audio.length,
     text: project.tracks.text.length,
+    overlay: (project.tracks.overlay || []).length,
     markers: (project.markers || []).length,
     media: project.mediaOrder.length,
   };
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Clip tools: crop presets, title styles, backgrounds (pure data / helpers; UI in inspector-tools.js)
+// ---------------------------------------------------------------------------------------------------------
+
+/** Crop aspect presets (output aspect width / height; null = free). 'frame' = the sequence's own aspect. */
+export const CROP_ASPECTS = [
+  { id: 'free', label: 'Free', aspect: null },
+  { id: 'frame', label: 'Frame', aspect: 'frame' },
+  { id: '16:9', label: '16:9', aspect: 16 / 9 },
+  { id: '9:16', label: '9:16', aspect: 9 / 16 },
+  { id: '1:1', label: '1:1', aspect: 1 },
+  { id: '4:5', label: '4:5', aspect: 4 / 5 },
+];
+
+/**
+ * Largest centred crop of a (w x h) source whose picture — after the clip's rotation — has the given aspect
+ * (width / height). Returns a normalized crop (null when that is the whole picture).
+ */
+export function cropForAspect(aspect, w, h, rotate = 0) {
+  if (!(aspect > 0) || !(w > 0) || !(h > 0)) return null;
+  const quarter = (rotate || 0) % 180 !== 0;
+  const want = quarter ? 1 / aspect : aspect; // in the unrotated source
+  const src = w / h;
+  let cw = 1;
+  let ch = 1;
+  if (src > want) cw = want / src;
+  else ch = src / want;
+  return M.normalizeCrop({ x: (1 - cw) / 2, y: (1 - ch) / 2, w: cw, h: ch });
+}
+
+/**
+ * Resizes / moves a normalized crop rectangle during a drag. `handle`: 'move' or a corner ('nw', 'ne', 'sw', 'se');
+ * dx / dy: pointer movement as fractions of the source picture; `ratio`: locked aspect in normalized units (crop w / h)
+ * or null. The opposite corner stays put when resizing. Returns a crop clamped inside the picture.
+ */
+export function dragCrop(start, handle, dx, dy, ratio = null) {
+  const c = start || { x: 0, y: 0, w: 1, h: 1 };
+  const min = M.MIN_CROP;
+  if (handle === 'move') {
+    return { x: clamp(c.x + dx, 0, 1 - c.w), y: clamp(c.y + dy, 0, 1 - c.h), w: c.w, h: c.h };
+  }
+  const west = handle.includes('w');
+  const north = handle.includes('n');
+  const ax = west ? c.x + c.w : c.x; // anchor (fixed corner)
+  const ay = north ? c.y + c.h : c.y;
+  let w = clamp(c.w + (west ? -dx : dx), min, west ? ax : 1 - ax);
+  let h = clamp(c.h + (north ? -dy : dy), min, north ? ay : 1 - ay);
+  if (ratio > 0) {
+    const maxW = west ? ax : 1 - ax;
+    const maxH = north ? ay : 1 - ay;
+    // Follow the larger relative change, then fit both inside the picture.
+    if (w / c.w >= h / c.h) h = w / ratio;
+    else w = h * ratio;
+    const s = Math.min(1, maxW / w, maxH / h);
+    w = Math.max(min, w * s);
+    h = Math.max(min, h * s);
+  }
+  return { x: west ? ax - w : ax, y: north ? ay - h : ay, w, h };
+}
+
+const FONT = {
+  sans: 'Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
+  condensed: '"Arial Narrow", "Roboto Condensed", "Helvetica Neue", Arial, sans-serif',
+  impact: 'Impact, Haettenschweiler, "Arial Black", sans-serif',
+  serif: '"Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif',
+  mono: 'ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace',
+};
+
+/**
+ * One-click title styles (iMovie's Titles browser), built on TextClip fields: {id, name, text, duration, animation,
+ * style} — style is merged over TEXT_STYLE_DEFAULTS.
+ */
+export const TITLE_PRESETS = [
+  { id: 'standard', name: 'Standard', text: 'Your title', duration: 3, animation: 'fade', style: {} },
+  {
+    id: 'lower-third',
+    name: 'Lower third',
+    text: 'Name Surname\nTitle or place',
+    duration: 4,
+    animation: 'slide-up',
+    style: { align: 'left', x: 0.06, y: 0.8, size: 0.05, weight: 600, background: 'rgba(0,0,0,0.55)', shadow: false, maxWidth: 0.6 },
+  },
+  { id: 'centered-bold', name: 'Centered bold', text: 'YOUR TITLE', duration: 3, animation: 'fade', style: { y: 0.5, size: 0.12, weight: 900 } },
+  {
+    id: 'cinematic',
+    name: 'Cinematic',
+    text: 'A FILM BY YOU',
+    duration: 4,
+    animation: 'fade',
+    style: { font: FONT.serif, y: 0.5, size: 0.06, weight: 400, shadow: false, letterbox: true },
+  },
+  {
+    id: 'subtitle',
+    name: 'Subtitle',
+    text: 'Subtitle text',
+    duration: 3,
+    animation: 'none',
+    style: { y: 0.9, size: 0.045, weight: 600, background: 'rgba(0,0,0,0.6)', shadow: false, maxWidth: 0.8 },
+  },
+  { id: 'typewriter', name: 'Typewriter', text: 'Once upon a time…', duration: 4, animation: 'typewriter', style: { font: FONT.mono, y: 0.5, size: 0.06, weight: 600 } },
+  { id: 'pop', name: 'Pop', text: 'WOW!', duration: 2, animation: 'pop', style: { font: FONT.impact, y: 0.5, size: 0.15, color: '#ffd166', outline: true } },
+  { id: 'boxed', name: 'Boxed', text: 'Chapter one', duration: 3, animation: 'fade', style: { y: 0.5, size: 0.065, color: '#111111', background: '#ffffff', shadow: false } },
+  { id: 'headline', name: 'Big headline', text: 'BREAKING', duration: 3, animation: 'slide-up', style: { font: FONT.condensed, y: 0.5, size: 0.17, weight: 900, outline: true } },
+  { id: 'end', name: 'The End', text: 'The End', duration: 3, animation: 'fade', style: { font: FONT.serif, y: 0.5, size: 0.1, weight: 400, italic: true } },
+  {
+    id: 'credits',
+    name: 'End credits',
+    text: 'Directed by\nYOUR NAME\n\nStarring\nTHE CAST\n\nMade with Grok Imagine',
+    duration: 8,
+    animation: 'scroll-up',
+    style: { y: 0.5, size: 0.05, weight: 600, maxWidth: 0.8 },
+  },
+];
+
+/** TextClip options (text, duration, animation, full style) for a title preset (null for unknown ids). */
+export function titlePresetClip(id) {
+  const p = TITLE_PRESETS.find((x) => x.id === id);
+  if (!p) return null;
+  return { text: p.text, duration: p.duration, animation: p.animation, style: { ...M.TEXT_STYLE_DEFAULTS, ...p.style } };
+}
+
+/**
+ * Applies a title preset's look (style + animation) to an existing title. Its text is kept unless it is still a
+ * preset's placeholder text; the duration is kept unless the preset needs a longer one (credits).
+ */
+export function applyTitlePreset(project, clipId, id) {
+  const found = M.findClip(project, clipId);
+  const preset = TITLE_PRESETS.find((x) => x.id === id);
+  if (!found || found.track !== 'text' || !preset) return project;
+  const c = found.clip;
+  const placeholder = !c.text || c.text === 'Your title' || c.text === 'Title' || TITLE_PRESETS.some((x) => x.text === c.text);
+  return updateClipIfChanged(project, clipId, {
+    style: { ...M.TEXT_STYLE_DEFAULTS, ...preset.style },
+    animation: preset.animation,
+    ...(placeholder ? { text: preset.text } : {}),
+    ...(preset.duration > c.duration ? { duration: preset.duration } : {}),
+  });
+}
+
+/** Id of the title preset whose look (style + animation) a text clip has, or null. */
+export function matchTitlePreset(clip) {
+  if (!clip) return null;
+  const style = { ...M.TEXT_STYLE_DEFAULTS, ...(clip.style || {}) };
+  for (const p of TITLE_PRESETS) {
+    const want = { ...M.TEXT_STYLE_DEFAULTS, ...p.style };
+    if (p.animation === (clip.animation || 'none') && Object.keys(want).every((k) => want[k] === style[k])) return p.id;
+  }
+  return null;
+}
+
+/** Solid colour / gradient backgrounds (iMovie's Backgrounds) for titles: {id, name, kind, colors}. */
+export const BACKGROUND_PRESETS = [
+  { id: 'black', name: 'Black', kind: 'solid', colors: ['#000000'] },
+  { id: 'white', name: 'White', kind: 'solid', colors: ['#ffffff'] },
+  { id: 'charcoal', name: 'Charcoal', kind: 'solid', colors: ['#22252e'] },
+  { id: 'blue', name: 'Blue gradient', kind: 'linear', colors: ['#1e3c72', '#2a5298'] },
+  { id: 'sunset', name: 'Sunset', kind: 'linear', colors: ['#ff7e5f', '#feb47b'] },
+  { id: 'ocean', name: 'Ocean', kind: 'linear', colors: ['#2193b0', '#6dd5ed'] },
+  { id: 'purple', name: 'Purple haze', kind: 'linear', colors: ['#41295a', '#2f0743'] },
+  { id: 'forest', name: 'Forest', kind: 'linear', colors: ['#134e5e', '#71b280'] },
+  { id: 'spotlight', name: 'Spotlight', kind: 'radial', colors: ['#4a4a58', '#0b0b10'] },
+  { id: 'paper', name: 'Warm paper', kind: 'radial', colors: ['#fbf1dc', '#e3cfa6'] },
+];
+
+/** CSS background of a background preset (swatches). */
+export function backgroundCss(preset) {
+  const [a, b = a] = preset.colors;
+  if (preset.kind === 'linear') return `linear-gradient(135deg, ${a}, ${b})`;
+  if (preset.kind === 'radial') return `radial-gradient(circle at 50% 45%, ${a}, ${b})`;
+  return a;
+}
+
+/** Paints a background preset into a (W x H) 2D context (canvas or OffscreenCanvas). */
+export function paintBackground(ctx, preset, W, H) {
+  const [a, b = a] = preset.colors;
+  let fill = a;
+  if (preset.kind === 'linear') {
+    fill = ctx.createLinearGradient(0, 0, W, H);
+    fill.addColorStop(0, a);
+    fill.addColorStop(1, b);
+  } else if (preset.kind === 'radial') {
+    fill = ctx.createRadialGradient(W / 2, H * 0.45, 0, W / 2, H * 0.45, Math.hypot(W, H) / 1.6);
+    fill.addColorStop(0, a);
+    fill.addColorStop(1, b);
+  }
+  ctx.fillStyle = fill;
+  ctx.fillRect(0, 0, W, H);
 }

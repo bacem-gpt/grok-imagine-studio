@@ -429,7 +429,7 @@ export class Overlay {
     if (this.iframe) return false;
     const iframe = document.createElement('iframe');
     iframe.src = STUDIO_URL;
-    iframe.allow = 'clipboard-read; clipboard-write; autoplay; fullscreen';
+    iframe.allow = 'clipboard-read; clipboard-write; autoplay; fullscreen; microphone';
     iframe.title = 'Imagine Studio';
     iframe.addEventListener('load', () => {
       this.tokenPromise = this._frameToken(); // one token per studio document, reused by the retries

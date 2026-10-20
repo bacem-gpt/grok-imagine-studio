@@ -24,18 +24,23 @@
 //
 // Pure helpers (videoClipGain, audioEnvelope, audioPlan, audioSignature) are exported for unit tests.
 
-import { layoutProject, videoItemsAt, sourceTimeAt, fadeFactor, transitionProgress } from '../core/model.js';
+import { layoutProject, videoItemsAt, sourceTimeAt, fadeFactor, transitionProgress, overlayItemsAt } from '../core/model.js';
 import { drawFrame, createScratch } from './compositor.js';
+import { fitRect } from './effects.js';
+import { rgbToHex } from './overlays.js';
+import { buildEqChain, duckWindows, duckFactorAt, isDucker } from './audio-fx.js';
 
 const DRIFT_TOLERANCE = 0.12; // s — resync a playing clip element that drifts further than this
 const SYNC_COOLDOWN = 0.4; // s (wall clock) after a play()/seek before drift is measured again
 const PRELOAD_AHEAD = 1.0; // s — park the next clip on its first frame this long before it starts
 const AUDIO_LEAD = 0.04; // s — scheduling headroom for AudioBufferSourceNodes
 const DECLICK = 0.004; // s — micro-ramp where an audio-track clip starts/stops abruptly
-const POOL_MAX = 8; // max simultaneous <video> elements
+const POOL_MAX = 12; // max simultaneous <video> elements (main track + overlay track)
 const STALE_LIMIT_MS = 1200; // draw an incomplete frame if no complete one could be drawn for this long
 const MAX_RATE = 4;
-const EMPTY_LAYOUT = { video: [], audio: [], text: [], videoEnd: 0, duration: 0 };
+const EMPTY_LAYOUT = { video: [], audio: [], text: [], overlay: [], videoEnd: 0, duration: 0 };
+/** Widest chroma-key pass in the preview (px): green-screen overlays key a downscaled copy to stay realtime. */
+const PREVIEW_KEY_MAX_W = 960;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const equalPowerIn = (p) => Math.sin(clamp(p, 0, 1) * Math.PI * 0.5);
@@ -47,7 +52,8 @@ const equalPowerOut = (p) => Math.cos(clamp(p, 0, 1) * Math.PI * 0.5);
  */
 export function videoClipGain(videoLayout, item, t) {
   const c = item.clip;
-  if (c.muted || t < item.start || t > item.end) return 0;
+  // A reversed clip's sound is only reversed in the export mixdown (a <video> can't play backwards); a freeze is silent.
+  if (c.muted || c.reverse || c.freeze || t < item.start || t > item.end) return 0;
   let g = Math.max(0, c.volume ?? 1) * fadeFactor(item, t);
   const pin = transitionProgress(item, t);
   if (pin != null) g *= equalPowerIn(pin);
@@ -96,6 +102,19 @@ export function audioPlan(audioLayout, t, end = Infinity) {
   }
   return out;
 }
+
+/** Gain of an overlay-track item's own sound at timeline time t: volume x mute x fades (0 outside the item). */
+export function overlayClipGain(item, t) {
+  const c = item.clip;
+  if (c.muted || t < item.start || t > item.end) return 0;
+  return Math.max(0, c.volume ?? 1) * fadeFactor(item, t);
+}
+
+/**
+ * Clips whose element is driven by seeking each frame instead of playing: reversed clips (a <video> can't play
+ * backwards) and freeze frames (one frame, held). Choppier than playback, but every frame shown is the right one.
+ */
+export const isSeekDriven = (clip) => !!(clip && (clip.reverse || clip.freeze));
 
 /** Signature of what requires re-scheduling audio-track sources (volume is applied live, so it's excluded). */
 export function audioSignature(project) {
@@ -154,6 +173,8 @@ export class Player {
     this._buffers = new Map(); // mediaId -> AudioBuffer | null (no sound)
     this._bufferPending = new Set();
     this._clipGains = new Map(); // audio clip id -> GainNode
+    this._clipEq = new Map(); // audio clip id -> {id: EQ preset, chain}
+    this._duck = []; // ducking windows (engine/audio-fx.js duckWindows)
     this._sources = []; // scheduled {src, env}
     this._audioSig = '';
     this._needsReschedule = false;
@@ -171,6 +192,7 @@ export class Player {
     this._staleSince = 0;
     this._lastSize = '';
     this._scratch = createScratch();
+    this._scratch.keyMaxWidth = PREVIEW_KEY_MAX_W;
     this._slates = new Map();
     this._destroyed = false;
     this._getSource = this._getSource.bind(this);
@@ -374,7 +396,7 @@ export class Player {
       const lay = this._lay();
       const t = this._renderTime(this._time, lay);
       if (!this._playing) this._syncVideo(t, false);
-      const items = videoItemsAt(lay.video, t);
+      const items = [...videoItemsAt(lay.video, t), ...overlayItemsAt(lay.overlay, t)];
       const problems = strict ? items.map((it) => this._sourceProblem(it)) : [];
       const hard = problems.find((x) => x && x !== 'loading');
       if (hard) throw new Error(`this frame shows ${hard}`);
@@ -386,6 +408,42 @@ export class Player {
         return canvas;
       }
       await new Promise((r) => setTimeout(r, 40));
+    }
+  }
+
+  /**
+   * Colour ('#rrggbb') of an overlay clip's own picture (before any keying) at (nx, ny) — fractions of the frame — at
+   * the current time, using the clip's full-frame framing (how green-screen overlays are drawn). Null when the clip
+   * isn't under the playhead or its picture doesn't load in time. Used by the key-colour eyedropper.
+   */
+  async sampleOverlayColor(clipId, nx, ny, { timeout = 2000 } = {}) {
+    const lay = this._lay();
+    const t = this._renderTime(this._time, lay);
+    const item = overlayItemsAt(lay.overlay, t).find((it) => it.clip.id === clipId);
+    if (!item) return null;
+    if (!this._playing) this._syncVideo(t, false);
+    const started = performance.now();
+    let src = this._getSource(item);
+    while (!src && performance.now() - started < timeout) {
+      await new Promise((r) => setTimeout(r, 40));
+      src = this._getSource(item);
+    }
+    if (!src) return null;
+    const W = this.canvas.width || 1280;
+    const H = this.canvas.height || 720;
+    const r = fitRect(src.width, src.height, W, H, item.clip.fit || 'cover');
+    const span = Math.max(1, Math.round(src.width / 160)); // average a few source pixels (compression noise)
+    const sx = clamp(((nx * W - r.x) / r.w) * src.width - span / 2, 0, Math.max(0, src.width - span));
+    const sy = clamp(((ny * H - r.y) / r.h) * src.height - span / 2, 0, Math.max(0, src.height - span));
+    const c = makeCanvas(1, 1);
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.imageSmoothingQuality = 'high';
+    try {
+      g.drawImage(src.image, sx, sy, span, span, 0, 0, 1, 1);
+      const d = g.getImageData(0, 0, 1, 1).data;
+      return rgbToHex(d[0], d[1], d[2]);
+    } catch {
+      return null;
     }
   }
 
@@ -431,8 +489,9 @@ export class Player {
 
   _projectChanged(p) {
     // Free the elements of clips that left the main track; unload elements of media no longer used at all.
-    const clipIds = new Set(p.tracks.video.map((c) => c.id));
-    const usedMedia = new Set(p.tracks.video.map((c) => c.mediaId));
+    const pictured = [...p.tracks.video, ...(p.tracks.overlay || [])];
+    const clipIds = new Set(pictured.map((c) => c.id));
+    const usedMedia = new Set(pictured.map((c) => c.mediaId));
     for (const [clipId, slot] of [...this._slots]) if (!clipIds.has(clipId)) this._releaseSlot(slot);
     for (const slot of this._allSlots) {
       if (!slot.clipId && slot.mediaId && !usedMedia.has(slot.mediaId)) this._unloadSlot(slot);
@@ -450,6 +509,7 @@ export class Player {
       if (m && m.status === 'ready' && !this._buffers.has(c.mediaId)) this._loadBuffer(c.mediaId);
     }
     for (const id of [...this._buffers.keys()]) if (!p.media[id]) this._buffers.delete(id);
+    this._duck = duckWindows(p, this._layout);
     this._applyClipVolumes(p);
     const sig = audioSignature(p);
     if (sig !== this._audioSig) {
@@ -551,6 +611,7 @@ export class Player {
     }
     this._syncVideo(t, true);
     this._updateGains(t);
+    this._updateClipLevels(t);
     this._render(t);
     this.onTime(t);
     this._raf = requestAnimationFrame(this._tick);
@@ -584,7 +645,7 @@ export class Player {
     }
     const lay = this._layout;
     const rt = this._renderTime(t, lay);
-    const complete = videoItemsAt(lay.video, rt).every((it) => this._getSource(it));
+    const complete = [...videoItemsAt(lay.video, rt), ...overlayItemsAt(lay.overlay, rt)].every((it) => this._getSource(it));
     if (!complete && this._hasFrame) {
       const now = performance.now();
       if (!this._staleSince) this._staleSince = now;
@@ -624,7 +685,11 @@ export class Player {
     if (!slot) return null;
     if (slot.error) return this._slate("Can't play this clip");
     const el = slot.el;
-    if (el.readyState < 2 || el.seeking) return null;
+    if (el.readyState < 2 || el.seeking) {
+      // A seek-driven clip (reversed / freeze frame) seeks every frame while playing: show the last frame it reached.
+      if (slot.hold && slot.holdClip === item.clip.id && isSeekDriven(item.clip)) return { image: slot.hold, width: slot.hold.width, height: slot.hold.height };
+      return null;
+    }
     return { image: el, width: el.videoWidth || media.width || 16, height: el.videoHeight || media.height || 9 };
   }
 
@@ -746,6 +811,8 @@ export class Player {
     };
     for (const ev of ['seeked', 'loadeddata', 'canplay']) el.addEventListener(ev, this._onMediaEvent);
     el.addEventListener('error', slot.onError);
+    slot.onSeeked = () => this._holdFrame(slot);
+    el.addEventListener('seeked', slot.onSeeked);
     this._allSlots.push(slot);
     this._routeSlot(slot);
     return slot;
@@ -831,6 +898,8 @@ export class Player {
   _disposeSlot(slot) {
     for (const ev of ['seeked', 'loadeddata', 'canplay']) slot.el.removeEventListener(ev, this._onMediaEvent);
     slot.el.removeEventListener('error', slot.onError);
+    slot.el.removeEventListener('seeked', slot.onSeeked);
+    slot.hold = null;
     this._releaseSlot(slot);
     this._unloadSlot(slot);
     try {
@@ -846,7 +915,7 @@ export class Player {
     const p = this._proj();
     if (!p) return;
     const lay = this._layout;
-    const active = videoItemsAt(lay.video, t);
+    const active = [...videoItemsAt(lay.video, t), ...overlayItemsAt(lay.overlay, t)];
     const keep = new Set(active.map((it) => it.clip.id));
     const upcoming = [];
     const ahead = PRELOAD_AHEAD * Math.max(1, Math.abs(this._rate));
@@ -859,6 +928,7 @@ export class Player {
     } else {
       for (const it of lay.video) if (!keep.has(it.clip.id) && it.end <= t && t - it.end <= ahead) upcoming.push(it);
     }
+    upcoming.push(...this._overlayUpcoming(lay, t, ahead, keep, playing));
     for (const it of upcoming) keep.add(it.clip.id);
     this._protected = keep;
     const now = performance.now() / 1000;
@@ -870,7 +940,8 @@ export class Player {
       if (!slot || slot.error) continue;
       const el = slot.el;
       const want = sourceTimeAt(it, t);
-      if (forward) {
+      slot.holdWanted = isSeekDriven(it.clip);
+      if (forward && !slot.holdWanted) {
         const rate = clamp((it.clip.speed || 1) * this._rate, 0.0625, 16);
         if (Math.abs(el.playbackRate - rate) > 1e-3) el.playbackRate = rate;
         if (el.paused) {
@@ -897,6 +968,48 @@ export class Player {
     }
     for (const slot of this._slots.values()) {
       if (!keep.has(slot.clipId) && !slot.el.paused) slot.el.pause();
+    }
+  }
+
+  /** Overlay items to park on their first (or, in reverse, last) frame because they start within `ahead` seconds. */
+  _overlayUpcoming(lay, t, ahead, keep, playing) {
+    const out = [];
+    const reverse = this._rate < 0 && playing;
+    for (const it of lay.overlay || []) {
+      if (keep.has(it.clip.id)) continue;
+      if (reverse ? it.end <= t && t - it.end <= ahead : it.start > t && it.start - t <= ahead) out.push(it);
+    }
+    return out;
+  }
+
+  /** Keeps a copy of the frame a seek-driven clip's element just reached (shown while its next seek runs). */
+  _holdFrame(slot) {
+    const el = slot.el;
+    if (!slot.holdWanted || !slot.clipId || el.readyState < 2 || !el.videoWidth) return;
+    try {
+      if (!slot.hold || slot.hold.width !== el.videoWidth || slot.hold.height !== el.videoHeight) slot.hold = makeCanvas(el.videoWidth, el.videoHeight);
+      slot.hold.getContext('2d').drawImage(el, 0, 0, slot.hold.width, slot.hold.height);
+      slot.holdClip = slot.clipId;
+    } catch {
+      slot.holdClip = null;
+    }
+  }
+
+  /** Routes a clip element's sound through the EQ preset of the clip it shows (rebuilt only when the preset changes). */
+  _applySlotEq(slot, eq) {
+    const want = eq || 'none';
+    if (!this._ac || !slot.node || !slot.gain || (slot.eqId || 'none') === want) return;
+    try {
+      slot.node.disconnect();
+      for (const n of slot.eqChain?.nodes || []) n.disconnect();
+      slot.eqChain = buildEqChain(this._ac, want);
+      if (slot.eqChain) {
+        slot.node.connect(slot.eqChain.input);
+        slot.eqChain.output.connect(slot.gain);
+      } else slot.node.connect(slot.gain);
+      slot.eqId = want;
+    } catch (e) {
+      console.warn('[gis] could not apply the clip EQ', e);
     }
   }
 
@@ -965,9 +1078,12 @@ export class Player {
     const lay = this._layout;
     const byId = new Map();
     for (const it of videoItemsAt(lay.video, t)) byId.set(it.clip.id, it);
+    for (const it of overlayItemsAt(lay.overlay, t)) byId.set(it.clip.id, it);
+    const duck = duckFactorAt(this._duck || [], t); // voice-over ducking lowers every picture clip's sound
     for (const slot of this._slots.values()) {
       const it = byId.get(slot.clipId);
-      const g = it && this._rate > 0 ? videoClipGain(lay.video, it, t) : 0;
+      if (it) this._applySlotEq(slot, it.clip.eq);
+      const g = duck * (it && this._rate > 0 ? (it.track === 'overlay' ? overlayClipGain(it, t) : videoClipGain(lay.video, it, t)) : 0);
       if (Math.abs(g - slot.lastGain) < 1e-3) continue;
       slot.lastGain = g;
       if (slot.gain && this._ac) slot.gain.gain.setTargetAtTime(g, this._ac.currentTime, 0.012);
@@ -979,11 +1095,49 @@ export class Player {
     let g = this._clipGains.get(clip.id);
     if (!g) {
       g = this._ac.createGain();
-      g.gain.value = Math.max(0, clip.volume ?? 1);
-      g.connect(this._master);
+      g.gain.value = this._clipLevel(clip, this._time);
+      this._wireClipEq(clip.id, g, clip.eq);
       this._clipGains.set(clip.id, g);
     }
     return g;
+  }
+
+  /** Live level of an audio-track clip at time t: its volume, lowered by other clips' ducking (duckers never are). */
+  _clipLevel(clip, t) {
+    const v = Math.max(0, clip.volume ?? 1);
+    return this._project && isDucker(this._project, clip) ? v : v * duckFactorAt(this._duck || [], t);
+  }
+
+  /** Connects an audio-track clip's gain to the master through its EQ preset (rewired only when the preset changes). */
+  _wireClipEq(clipId, g, eq) {
+    const want = eq || 'none';
+    const cur = this._clipEq.get(clipId);
+    if (cur && cur.id === want) return;
+    try {
+      g.disconnect();
+      for (const n of cur?.chain?.nodes || []) n.disconnect();
+      const chain = buildEqChain(this._ac, want);
+      if (chain) {
+        g.connect(chain.input);
+        chain.output.connect(this._master);
+      } else g.connect(this._master);
+      this._clipEq.set(clipId, { id: want, chain });
+    } catch (e) {
+      console.warn('[gis] could not apply the audio clip EQ', e);
+    }
+  }
+
+  /** Per-frame audio-track levels while playing (ducking ramps follow the playhead). */
+  _updateClipLevels(t) {
+    if (!this._ac || !this._project || !this._duck?.length) return;
+    for (const c of this._project.tracks.audio) {
+      const g = this._clipGains.get(c.id);
+      if (!g) continue;
+      const v = this._clipLevel(c, t);
+      if (Math.abs((g._gisLevel ?? -1) - v) < 1e-3) continue;
+      g._gisLevel = v;
+      g.gain.setTargetAtTime(v, this._ac.currentTime, 0.012);
+    }
   }
 
   _applyClipVolumes(p) {
@@ -992,12 +1146,17 @@ export class Player {
     for (const c of p.tracks.audio) {
       ids.add(c.id);
       const g = this._clipGains.get(c.id);
-      const v = Math.max(0, c.volume ?? 1);
-      if (g && Math.abs(g.gain.value - v) > 1e-4) g.gain.setTargetAtTime(v, this._ac.currentTime, 0.015);
+      if (!g) continue;
+      this._wireClipEq(c.id, g, c.eq);
+      const v = this._clipLevel(c, this._time);
+      g._gisLevel = v;
+      if (Math.abs(g.gain.value - v) > 1e-4) g.gain.setTargetAtTime(v, this._ac.currentTime, 0.015);
     }
     for (const [id, g] of [...this._clipGains]) {
       if (!ids.has(id)) {
         g.disconnect();
+        for (const n of this._clipEq.get(id)?.chain?.nodes || []) n.disconnect();
+        this._clipEq.delete(id);
         this._clipGains.delete(id);
       }
     }

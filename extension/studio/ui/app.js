@@ -1,4 +1,4 @@
-// App shell: header (project menu, tabs, undo/redo, connection, export, dock controls) and the four views.
+// App shell: header (project menu, tabs, undo/redo, connection, export, dock controls) and the five views.
 // Views stay mounted after first visit (hidden when inactive) so players and forms keep their state;
 // each receives `active` to pause work while hidden.
 import { html, useState, useEffect } from '../../vendor/preact-htm.mjs';
@@ -26,6 +26,7 @@ import { Icon, IconButton, Button, Tabs, Modal, ToastHost, DialogHost, MenuHost,
 import { ClipsView } from './media/clips-view.js';
 import { EditView } from './edit/edit-view.js';
 import { PromptsView } from './prompts/prompts-view.js';
+import { DialogueView } from './dialogue/dialogue-view.js';
 import { IngredientsView } from './ingredients/ingredients-view.js';
 import { ExportDialog } from './export/export-dialog.js';
 
@@ -226,6 +227,7 @@ function Header() {
     bin: p.mediaOrder.length,
     duration: M.sequenceDuration(p),
     shots: p.shots?.length || 0,
+    parts: p.dialogue?.parts?.length || 0,
   }));
   const ingredients = useLibrary((l) => l.ingredients.length);
   const hist = useHistoryState();
@@ -233,7 +235,8 @@ function Header() {
     { id: 'clips', label: 'Clips', icon: 'film', badge: counts.bin || null, title: 'Collect and pick generated clips (Alt+1)' },
     { id: 'edit', label: 'Edit', icon: 'scissors', badge: counts.duration > 0 ? formatDuration(counts.duration) : null, title: 'Timeline editor (Alt+2)' },
     { id: 'prompts', label: 'Prompts', icon: 'sparkles', badge: counts.shots || null, title: 'Shot list and prompt builder (Alt+3)' },
-    { id: 'ingredients', label: 'Ingredients', icon: 'images', badge: ingredients || null, title: 'Reference images (Alt+4)' },
+    { id: 'dialogue', label: 'Dialogue', icon: 'quote', badge: counts.parts || null, title: 'Split a long dialogue into one part per video (Alt+4)' },
+    { id: 'ingredients', label: 'Ingredients', icon: 'images', badge: ingredients || null, title: 'Reference images (Alt+5)' },
   ];
   return html`<header class="app-header">
     <div class="brand" title="Grok Imagine Studio"><${Icon} name="logo" size=${18} /></div>
@@ -307,7 +310,8 @@ export function App() {
     'alt+1': () => setTab('clips'),
     'alt+2': () => setTab('edit'),
     'alt+3': () => setTab('prompts'),
-    'alt+4': () => setTab('ingredients'),
+    'alt+4': () => setTab('dialogue'),
+    'alt+5': () => setTab('ingredients'),
   });
 
   if (!hasProject) return html`<div class="boot">Loading…</div>`;
@@ -317,6 +321,7 @@ export function App() {
       <${View} id="clips" active=${tab === 'clips'}><${ClipsView} active=${tab === 'clips'} /><//>
       <${View} id="edit" active=${tab === 'edit'}><${EditView} active=${tab === 'edit'} /><//>
       <${View} id="prompts" active=${tab === 'prompts'}><${PromptsView} active=${tab === 'prompts'} /><//>
+      <${View} id="dialogue" active=${tab === 'dialogue'}><${DialogueView} active=${tab === 'dialogue'} /><//>
       <${View} id="ingredients" active=${tab === 'ingredients'}><${IngredientsView} active=${tab === 'ingredients'} /><//>
     </main>
     ${exportOpen && html`<${ExportDialog} onClose=${() => uiStore.set((s) => ({ ...s, exportOpen: false }))} />`}

@@ -26,7 +26,9 @@ export function fitRect(sw, sh, W, H, fit = 'cover') {
 export function buildFilter(filters, H, extraBlurPx = 0) {
   const f = { ...FILTER_DEFAULTS, ...(filters || {}) };
   const parts = [];
-  if (f.brightness !== 1) parts.push(`brightness(${f.brightness})`);
+  // Exposure (EV stops) is a linear gain like CSS brightness(): both fold into one brightness() function.
+  const bright = f.brightness * (f.exposure ? Math.pow(2, f.exposure) : 1);
+  if (bright !== 1) parts.push(`brightness(${+bright.toFixed(4)})`);
   if (f.contrast !== 1) parts.push(`contrast(${f.contrast})`);
   if (f.saturate !== 1) parts.push(`saturate(${f.saturate})`);
   if (f.hue) parts.push(`hue-rotate(${f.hue}deg)`);
@@ -36,6 +38,211 @@ export function buildFilter(filters, H, extraBlurPx = 0) {
   const blur = (f.blur || 0) * (H / 720) + extraBlurPx;
   if (blur > 0.05) parts.push(`blur(${blur.toFixed(2)}px)`);
   return parts.length ? parts.join(' ') : 'none';
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Crop / rotate / flip (clip.crop, clip.rotate, clip.flipH, clip.flipV — see core/model.js "clip tools")
+// ---------------------------------------------------------------------------------------------------------
+
+/** True when a clip draws its source with a crop, a rotation or a mirror. */
+export const hasCropRotate = (clip) => !!(clip && (clip.crop || clip.rotate || clip.flipH || clip.flipV));
+
+/** Source pixel rectangle {sx, sy, sw, sh} a clip's crop selects from a (w x h) picture. */
+export function cropRect(clip, w, h) {
+  const c = clip?.crop;
+  if (!c) return { sx: 0, sy: 0, sw: w, sh: h };
+  return { sx: c.x * w, sy: c.y * h, sw: Math.max(1, c.w * w), sh: Math.max(1, c.h * h) };
+}
+
+/** Size of the picture a clip shows once cropped and rotated (what the fit — cover / contain / fill — works with). */
+export function orientedSize(clip, w, h) {
+  const r = cropRect(clip, w, h);
+  const quarter = (clip?.rotate || 0) % 180 !== 0;
+  return quarter ? { w: r.sh, h: r.sw } : { w: r.sw, h: r.sh };
+}
+
+/**
+ * Draws a source picture with the clip's crop, rotation and mirroring into the destination rectangle (x, y, w, h),
+ * which has the oriented aspect (orientedSize). Without crop / rotate / flip it is a plain drawImage().
+ */
+export function drawOriented(ctx, image, clip, srcW, srcH, x, y, w, h) {
+  if (!hasCropRotate(clip)) {
+    ctx.drawImage(image, x, y, w, h);
+    return;
+  }
+  const r = cropRect(clip, srcW, srcH);
+  const rot = clip.rotate || 0;
+  const quarter = rot % 180 !== 0;
+  ctx.save();
+  ctx.translate(x + w / 2, y + h / 2);
+  // Mirror the picture as seen (after rotation): scale first, then rotate the drawing.
+  if (clip.flipH || clip.flipV) ctx.scale(clip.flipH ? -1 : 1, clip.flipV ? -1 : 1);
+  if (rot) ctx.rotate((rot * Math.PI) / 180);
+  const dw = quarter ? h : w;
+  const dh = quarter ? w : h;
+  ctx.drawImage(image, r.sx, r.sy, r.sw, r.sh, -dw / 2, -dh / 2, dw, dh);
+  ctx.restore();
+}
+
+/**
+ * Draws a clip's source fitted into (W x H) — crop, rotation and mirroring included. Returns the destination rect.
+ * Shared by the main track (compositor drawItem) and anything else that frames a clip the same way.
+ */
+export function drawClipSource(ctx, source, clip, W, H, fit = clip?.fit || 'cover') {
+  const o = orientedSize(clip, source.width, source.height);
+  const r = fitRect(o.w, o.h, W, H, fit);
+  drawOriented(ctx, source.image, clip, source.width, source.height, r.x, r.y, r.w, r.h);
+  return r;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// White balance (temperature / tint)
+// ---------------------------------------------------------------------------------------------------------
+
+/**
+ * Per-channel gains [r, g, b] of a white-balance shift: temperature -1 (cool) .. 1 (warm) scales red up and blue down
+ * (or the reverse), tint -1 (green) .. 1 (magenta) scales green; normalized so the luma (Rec. 709) stays the same.
+ */
+export function whiteBalanceGains(temperature = 0, tint = 0) {
+  const T = clamp(Number(temperature) || 0, -1, 1);
+  const M = clamp(Number(tint) || 0, -1, 1);
+  let r = (1 + 0.3 * T) * (1 + 0.06 * M);
+  let g = 1 - 0.25 * M;
+  let b = (1 - 0.3 * T) * (1 + 0.06 * M);
+  const L = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  r /= L;
+  g /= L;
+  b /= L;
+  return [r, g, b];
+}
+
+/** White-balance gains of a clip's filters, or null when neutral (nothing to grade). */
+export function gradeGains(filters) {
+  const t = filters?.temperature || 0;
+  const m = filters?.tint || 0;
+  if (Math.abs(t) < 1e-4 && Math.abs(m) < 1e-4) return null;
+  return whiteBalanceGains(t, m);
+}
+
+const gradePool = { layer: null, tmp: null };
+function gradeCanvas(which, W, H) {
+  let c = gradePool[which];
+  if (!c || c.width !== W || c.height !== H) {
+    if (typeof OffscreenCanvas !== 'undefined') c = new OffscreenCanvas(W, H);
+    else {
+      c = document.createElement('canvas');
+      c.width = W;
+      c.height = H;
+    }
+    gradePool[which] = c;
+  }
+  return c;
+}
+
+/** A cleared, transparent (W x H) layer for drawing a picture that will be graded (shared, not re-entrant). */
+export function gradeLayer(W, H) {
+  const c = gradeCanvas('layer', W, H);
+  const g = c.getContext('2d');
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.globalAlpha = 1;
+  g.globalCompositeOperation = 'source-over';
+  g.filter = 'none';
+  g.clearRect(0, 0, W, H);
+  return c;
+}
+
+const rgb = (r, g, b) => `rgb(${Math.round(clamp(r, 0, 1) * 255)},${Math.round(clamp(g, 0, 1) * 255)},${Math.round(clamp(b, 0, 1) * 255)})`;
+
+/**
+ * Multiplies the colour channels of a transparent-backed layer by [r, g, b] (each 0..2), keeping its alpha. Canvas 2D
+ * has no colour matrix that works on OffscreenCanvas (SVG filters need a document), so this uses composite operations:
+ * gains below 1 are a 'multiply' fill; gains above 1 add `layer x (gain - 1)` back with 'lighter'; 'destination-in'
+ * restores the picture's alpha after each fill. Exact for opaque pixels, GPU-fast, and identical in preview and export.
+ */
+export function applyChannelGains(layer, [r, g, b]) {
+  const W = layer.width;
+  const H = layer.height;
+  const lg = layer.getContext('2d');
+  const tmp = gradeCanvas('tmp', W, H);
+  const tg = tmp.getContext('2d');
+  tg.setTransform(1, 0, 0, 1, 0, 0);
+  tg.filter = 'none';
+  tg.globalAlpha = 1;
+  tg.globalCompositeOperation = 'copy';
+  tg.drawImage(layer, 0, 0);
+  lg.save();
+  lg.setTransform(1, 0, 0, 1, 0, 0);
+  lg.filter = 'none';
+  lg.globalAlpha = 1;
+  if (r < 1 || g < 1 || b < 1) {
+    lg.globalCompositeOperation = 'multiply';
+    lg.fillStyle = rgb(Math.min(r, 1), Math.min(g, 1), Math.min(b, 1));
+    lg.fillRect(0, 0, W, H);
+    lg.globalCompositeOperation = 'destination-in';
+    lg.drawImage(tmp, 0, 0);
+  }
+  if (r > 1 || g > 1 || b > 1) {
+    tg.globalCompositeOperation = 'multiply';
+    tg.fillStyle = rgb(Math.max(r - 1, 0), Math.max(g - 1, 0), Math.max(b - 1, 0));
+    tg.fillRect(0, 0, W, H);
+    tg.globalCompositeOperation = 'destination-in';
+    tg.drawImage(layer, 0, 0);
+    lg.globalCompositeOperation = 'lighter';
+    lg.drawImage(tmp, 0, 0);
+  }
+  lg.restore();
+  tg.globalCompositeOperation = 'source-over';
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Auto enhance
+// ---------------------------------------------------------------------------------------------------------
+
+/**
+ * Luminance statistics of RGBA pixel data: {mean, low, high, sat} — low / high = the 2nd / 98th luma percentiles,
+ * sat = mean chroma (max - min channel); all 0..1.
+ */
+export function lumaStats(data) {
+  const hist = new Uint32Array(256);
+  let n = 0;
+  let sum = 0;
+  let sat = 0;
+  for (let i = 0; i + 3 < data.length; i += 4) {
+    if (data[i + 3] < 8) continue;
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const y = Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b);
+    hist[y]++;
+    sum += y;
+    sat += Math.max(r, g, b) - Math.min(r, g, b);
+    n++;
+  }
+  if (!n) return { mean: 0.5, low: 0, high: 1, sat: 0.25 };
+  const pct = (p) => {
+    const target = p * n;
+    let acc = 0;
+    for (let v = 0; v < 256; v++) {
+      acc += hist[v];
+      if (acc >= target) return v / 255;
+    }
+    return 1;
+  };
+  return { mean: sum / n / 255, low: pct(0.02), high: pct(0.98), sat: sat / n / 255 };
+}
+
+/**
+ * iMovie-style "Auto enhance" from luminance statistics: stretches contrast toward the full range, brings the mean
+ * toward mid-grey and lifts dull colour a little. Returns a filters patch {brightness, contrast, saturate} (gentle and
+ * clamped; a well-exposed picture stays close to neutral).
+ */
+export function autoEnhanceFilters({ mean, low, high, sat }) {
+  const range = Math.max(0.05, high - low);
+  const contrast = clamp(0.9 / range, 1, 1.45); // never flattens a picture that already spans the range
+  const brightness = clamp(Math.pow(0.48 / Math.max(0.04, mean), 0.6), 0.75, 1.5);
+  const saturate = clamp(sat < 0.2 ? 1 + (0.2 - sat) * 1.6 : 1.05, 1, 1.35);
+  const r2 = (v) => Math.round(v * 100) / 100;
+  return { brightness: r2(brightness), contrast: r2(contrast), saturate: r2(saturate) };
 }
 
 /** Darkens the frame edges. strength 0..1. */
@@ -181,6 +388,17 @@ function wrapCached(ctx, text, maxWidth) {
   return lines;
 }
 
+/** Cinematic bars (12% of the height, top and bottom) behind a title; `alpha` follows the title's animation. */
+function drawLetterbox(ctx, W, H, alpha) {
+  const bar = Math.round(H * 0.12);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, bar);
+  ctx.fillRect(0, H - bar, W, bar);
+  ctx.restore();
+}
+
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   if (ctx.roundRect) ctx.roundRect(x, y, w, h, r);
@@ -211,6 +429,10 @@ export function textAnimationState(animation, local, duration, charCount) {
       st.alpha = outK;
       break;
     }
+    case 'scroll-up':
+      // End credits: the block rolls from below the frame to above it over the whole clip (drawTextItem places it).
+      st.scroll = duration > 0 ? clamp(local / duration, 0, 1) : 1;
+      break;
     default:
       break;
   }
@@ -247,7 +469,9 @@ export function drawTextItem(ctx, item, t, W, H) {
   const widths = fullLines.map((l) => ctx.measureText(l.text).width);
   const blockW = Math.max(...widths, 1);
   const cx = style.x * W;
-  const cy = style.y * H + anim.dy * H;
+  let cy = style.y * H + anim.dy * H;
+  if (anim.scroll != null) cy = lerp(H + blockH / 2 + size * 0.5, -blockH / 2 - size * 0.5, anim.scroll);
+  if (style.letterbox) drawLetterbox(ctx, W, H, anim.alpha);
   ctx.translate(cx, cy);
   if (anim.scale !== 1) ctx.scale(anim.scale, anim.scale);
   const align = style.align || 'center';

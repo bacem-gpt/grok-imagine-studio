@@ -16,8 +16,10 @@ import { Icon, IconButton, Button, Slider, NumberField, TimeField, Select, Toggl
 import * as Ops from './edit-ops.js';
 import * as A from './actions.js';
 import { TransitionSwatch, transitionName, maxTransitionAt, TRANSITION_KINDS } from './transition-popover.js';
+import { SpeedTools, FreezeTiming, CropRotateSection, EqField, DuckSection, TitleStyles } from './inspector-tools.js';
+import { OverlayPanel } from './overlay-panel.js';
 
-const FILTER_SPECS = [
+export const FILTER_SPECS = [
   { key: 'brightness', label: 'Brightness', min: 0, max: 2, step: 0.01, fmt: (v) => `${Math.round(v * 100)}%` },
   { key: 'contrast', label: 'Contrast', min: 0, max: 2, step: 0.01, fmt: (v) => `${Math.round(v * 100)}%` },
   { key: 'saturate', label: 'Saturation', min: 0, max: 3, step: 0.01, fmt: (v) => `${Math.round(v * 100)}%` },
@@ -27,9 +29,12 @@ const FILTER_SPECS = [
   { key: 'invert', label: 'Invert', min: 0, max: 1, step: 0.01, fmt: (v) => `${Math.round(v * 100)}%` },
   { key: 'blur', label: 'Blur', min: 0, max: 20, step: 0.1, fmt: (v) => `${v.toFixed(1)}px` },
   { key: 'vignette', label: 'Vignette', min: 0, max: 1, step: 0.01, fmt: (v) => `${Math.round(v * 100)}%` },
+  { key: 'exposure', label: 'Exposure', min: -2, max: 2, step: 0.05, fmt: (v) => `${v > 0 ? '+' : ''}${v.toFixed(2)} EV` },
+  { key: 'temperature', label: 'Temperature', min: -1, max: 1, step: 0.01, fmt: (v) => (Math.abs(v) < 0.005 ? '0' : `${v > 0 ? 'Warm' : 'Cool'} ${Math.round(Math.abs(v) * 100)}`) },
+  { key: 'tint', label: 'Tint', min: -1, max: 1, step: 0.01, fmt: (v) => (Math.abs(v) < 0.005 ? '0' : `${v > 0 ? 'Magenta' : 'Green'} ${Math.round(Math.abs(v) * 100)}`) },
 ];
 
-const ANIMATION_LABELS = { none: 'None', fade: 'Fade', 'slide-up': 'Slide up', pop: 'Pop', typewriter: 'Typewriter' };
+const ANIMATION_LABELS = { none: 'None', fade: 'Fade', 'slide-up': 'Slide up', pop: 'Pop', typewriter: 'Typewriter', 'scroll-up': 'Credits roll' };
 const TEXT_POSITIONS = [
   { id: 'top', label: 'Top', x: 0.5, y: 0.14 },
   { id: 'center', label: 'Center', x: 0.5, y: 0.5 },
@@ -48,6 +53,7 @@ const SHORTCUTS = [
   ['mod+c', 'Copy (Ctrl+V paste at playhead)'],
   ['t', 'Add a title'],
   ['m', 'Add a marker'],
+  ['shift+f', 'Freeze frame at the playhead'],
   ['plus', 'Zoom in (− out, \\ fit)'],
   ['f', 'Full-screen preview'],
 ];
@@ -282,7 +288,9 @@ function VideoPanel({ clip, item, media, project, session }) {
   return html`
     <${ClipHeader} icon=${isImage ? 'image' : 'film'} kind="video" title=${clip.label || media?.name || 'Clip'} sub=${sub} thumb=${previews?.thumb} />
     <${Section} title="Timing">
-      ${isImage
+      ${clip.freeze
+        ? html`<${FreezeTiming} clip=${clip} item=${item} project=${project} ed=${ed} />`
+        : isImage
         ? html`<${Field} label="Duration">
             <${TimeField} value=${clip.out - clip.in} min=${M.MIN_CLIP_DURATION} max=${3600} fps=${project.settings.fps} onChange=${(v) => ed.set({ out: clip.in + v }, 'Set duration')} />
           <//>`
@@ -294,8 +302,9 @@ function VideoPanel({ clip, item, media, project, session }) {
               <${TimeField} value=${clip.out} min=${clip.in + M.MIN_CLIP_DURATION} max=${maxSrc} fps=${project.settings.fps} onChange=${(v) => ed.set({ out: v }, 'Set out point')} />
             <//>
           </div>`}
-      <div class="insp-note">On the timeline <b class="mono">${formatTime(item.start)}</b> → <b class="mono">${formatTime(item.end)}</b></div>
+      ${!clip.freeze && html`<div class="insp-note">On the timeline <b class="mono">${formatTime(item.start)}</b> → <b class="mono">${formatTime(item.end)}</b></div>`}
       ${!isImage &&
+      !clip.freeze &&
       html`<${LiveSlider}
           ed=${ed}
           field="speed"
@@ -313,9 +322,11 @@ function VideoPanel({ clip, item, media, project, session }) {
           ${[0.5, 1, 1.5, 2, 3].map(
             (s) => html`<button type="button" key=${s} class=${cx('chip', Math.abs(speed - s) < 1e-3 && 'is-active')} onClick=${() => ed.set({ speed: s }, `Speed ${s}×`)}>${s}×</button>`,
           )}
-        </div>`}
+        </div>
+        <${SpeedTools} clip=${clip} session=${session} />`}
     <//>
     ${hasSound &&
+    !clip.freeze &&
     html`<${Section} title="Sound">
       <div class="insp-inline">
         <div class="grow">
@@ -323,6 +334,7 @@ function VideoPanel({ clip, item, media, project, session }) {
         </div>
         <${IconButton} icon=${clip.muted ? 'volume-x' : 'volume'} title=${clip.muted ? 'Unmute' : 'Mute'} active=${clip.muted} onClick=${() => ed.set({ muted: !clip.muted }, clip.muted ? 'Unmute clip' : 'Mute clip')} />
       </div>
+      <${EqField} clip=${clip} />
       <${ActionRow}>
         <${Button} size="sm" kind="ghost" icon="music" disabled=${!Ops.canDetachAudio(project, clip)} title="Move the sound to an audio lane (needs 1× speed)" onClick=${() => A.detachAudio(clip.id)}>Detach audio<//>
       <//>
@@ -338,6 +350,7 @@ function VideoPanel({ clip, item, media, project, session }) {
         onChange=${(v) => ed.set({ fit: v }, 'Change framing')}
       />
     <//>
+    <${CropRotateSection} clip=${clip} media=${media} project=${project} />
     <${Section} title="Color & look">
       <div class="insp-looks">
         ${M.FILTER_PRESETS.map(
@@ -375,6 +388,7 @@ function VideoPanel({ clip, item, media, project, session }) {
         )}
       </div>
       <${ActionRow}>
+        <${Button} size="sm" icon="wand" title="Balance brightness, contrast and colour from the clip's picture" onClick=${() => A.autoEnhance(clip.id)}>Auto enhance<//>
         <${Button} size="sm" kind="ghost" icon="refresh" disabled=${neutral} onClick=${() => ed.set({ filters: null }, 'Reset look')}>Reset look<//>
       <//>
     <//>
@@ -484,6 +498,8 @@ function AudioPanel({ clip, item, media, project, session }) {
         <button type="button" class="chip" onClick=${() => ed.set({ fadeIn: Math.min(1, dur / 2), fadeOut: Math.min(2, dur / 2) }, 'Fade in & out')}>Fade in & out</button>
         <button type="button" class="chip" onClick=${() => ed.set({ fadeIn: 0, fadeOut: 0 }, 'Remove fades')}>No fades</button>
       </div>
+      <${EqField} clip=${clip} />
+      <${DuckSection} clip=${clip} ed=${ed} />
     <//>
     <${Section} title="Clip">
       <${ActionRow}>
@@ -544,6 +560,9 @@ function TextPanel({ clip, item, project, session }) {
         />
       <//>
     <//>
+    <${Section} title="Title style">
+      <${TitleStyles} clip=${clip} />
+    <//>
     <${Section} title="Style">
       <${Field} label="Font">
         <${Select} value=${style.font} options=${fontOptions} onChange=${(v) => setStyle({ font: v }, 'Change font')} />
@@ -598,6 +617,7 @@ function TextPanel({ clip, item, project, session }) {
       <div class="insp-toggles">
         <${Toggle} checked=${!!style.shadow} label="Shadow" onChange=${(v) => setStyle({ shadow: v }, v ? 'Text shadow' : 'No text shadow')} />
         <${Toggle} checked=${!!style.outline} label="Outline" onChange=${(v) => setStyle({ outline: v }, v ? 'Text outline' : 'No text outline')} />
+        <${Toggle} checked=${!!style.letterbox} label="Letterbox" onChange=${(v) => setStyle({ letterbox: v }, v ? 'Letterbox bars' : 'No letterbox bars')} />
       </div>
       <${LiveSlider} ed=${ed} field="maxWidth" label="Wrap width" value=${style.maxWidth || 0.9} min=${0.2} max=${1} step=${0.01} format=${pct} resetValue=${0.9} patch=${liveStyle('maxWidth')} undoLabel="Text wrap width" />
     <//>
@@ -791,6 +811,10 @@ export function Inspector({ session, onClose, closable = false }) {
       title = 'Audio';
       const item = lay.audio.find((it) => it.clip.id === found.clip.id);
       body = html`<${AudioPanel} key=${found.clip.id} clip=${found.clip} item=${item} media=${project.media[found.clip.mediaId]} project=${project} session=${session} />`;
+    } else if (found.track === 'overlay') {
+      title = 'Overlay';
+      const item = lay.overlay.find((it) => it.clip.id === found.clip.id);
+      body = html`<${OverlayPanel} key=${found.clip.id} clip=${found.clip} item=${item} media=${project.media[found.clip.mediaId]} project=${project} session=${session} />`;
     } else {
       title = 'Title';
       const item = lay.text.find((it) => it.clip.id === found.clip.id);

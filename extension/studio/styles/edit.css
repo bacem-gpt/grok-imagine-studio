@@ -2249,3 +2249,610 @@
 .insp-key .kbd {
   min-width: 54px;
 }
+
+/* ---------------------------------------------------------------------------------------------------------
+   Overlay track (V2…): picture in picture, cutaway, side by side, green screen
+   --------------------------------------------------------------------------------------------------------- */
+:root {
+  --clip-overlay: #d0499a;
+}
+.tl-row-overlay {
+  background: rgba(208, 73, 154, 0.03);
+}
+.tl-row-overlay .tl-row-head {
+  color: #f19acb;
+  box-shadow: inset 2px 0 0 var(--clip-overlay);
+}
+.tl-body.is-dropping .tl-row-overlay {
+  background: rgba(208, 73, 154, 0.07);
+}
+.tl-row-add {
+  margin-left: auto;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border-radius: 4px;
+  border: 1px solid rgba(208, 73, 154, 0.45);
+  background: rgba(208, 73, 154, 0.12);
+  color: #f19acb;
+  cursor: pointer;
+}
+.tl-row-add:hover {
+  background: rgba(208, 73, 154, 0.28);
+  color: #fff;
+}
+.tl.is-narrow .tl-row-add {
+  width: 15px;
+  height: 15px;
+}
+.tl-clip-overlay {
+  background: #2a1426;
+  border-color: rgba(208, 73, 154, 0.7);
+}
+.tl-clip-overlay .tl-strip {
+  background-color: #1f0f1c;
+}
+.tl-clip-overlay .tl-strip::after {
+  /* tint the filmstrip so overlays read apart from main-track clips at a glance */
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(208, 73, 154, 0.12), rgba(208, 73, 154, 0.04));
+  pointer-events: none;
+}
+.tl-ov-mode {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--clip-overlay);
+  color: #fff;
+}
+.tl-insert-overlay {
+  width: 2px;
+  background: var(--clip-overlay);
+  box-shadow: 0 0 0 3px rgba(208, 73, 154, 0.22), 0 0 12px rgba(208, 73, 154, 0.85);
+}
+
+/* Monitor: PiP box editor and key-colour eyedropper (over the canvas, same size and position) */
+.ovh-layer {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  pointer-events: none;
+}
+.ovh-box {
+  position: absolute;
+  pointer-events: auto;
+  cursor: move;
+  touch-action: none;
+  outline: 1.5px solid rgba(255, 255, 255, 0.9);
+  outline-offset: 0;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.ovh-box:hover {
+  outline-color: #fff;
+  background: rgba(255, 255, 255, 0.04);
+}
+.ovh-label {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font: 600 10px var(--mono);
+  pointer-events: none;
+}
+.ovh-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: #fff;
+  border: 1.5px solid var(--clip-overlay);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  touch-action: none;
+}
+.ovh-handle.is-right {
+  right: -6px;
+}
+.ovh-handle.is-left {
+  left: -6px;
+}
+.ovh-handle.is-bottom {
+  bottom: -6px;
+}
+.ovh-handle.is-top {
+  top: -6px;
+}
+.ovh-handle.is-right.is-bottom,
+.ovh-handle.is-left.is-top {
+  cursor: nwse-resize;
+}
+.ovh-handle.is-left.is-bottom,
+.ovh-handle.is-right.is-top {
+  cursor: nesw-resize;
+}
+.ovh-pick {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  cursor: crosshair;
+  box-shadow: inset 0 0 0 2px var(--clip-overlay);
+}
+.ovh-pick-hint {
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: calc(100% - 16px);
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(10, 10, 14, 0.85);
+  color: var(--text-0);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* Inspector: overlay panel */
+.insp-clip-thumb.is-overlay {
+  background-color: #3a1532;
+  color: #f19acb;
+}
+.ovp-modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.ovp-mode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 5px 8px 5px 6px;
+  text-align: left;
+  border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-2);
+  color: var(--text-1);
+  cursor: pointer;
+}
+.ovp-mode:hover {
+  border-color: #4a4a5c;
+  color: var(--text-0);
+}
+.ovp-mode.is-active {
+  border-color: var(--clip-overlay);
+  background: rgba(208, 73, 154, 0.14);
+  color: #fff;
+}
+.ovp-mode-name {
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+/* little diagrams of each mode: grey = main track, pink = overlay */
+.ovp-mode-art {
+  position: relative;
+  flex: none;
+  width: 38px;
+  aspect-ratio: 16 / 9;
+  border-radius: 3px;
+  background: #4b4b5a;
+  overflow: hidden;
+}
+.ovp-mode-art > span {
+  position: absolute;
+  background: var(--clip-overlay);
+}
+.ovp-mode-art.is-pip > span {
+  right: 8%;
+  top: 12%;
+  width: 38%;
+  height: 38%;
+  border-radius: 1px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+.ovp-mode-art.is-cutaway > span {
+  inset: 0;
+}
+.ovp-mode-art.is-split > span {
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+}
+.ovp-mode-art.is-greenscreen {
+  background: linear-gradient(135deg, #3a3a48, #5a5a6c);
+}
+.ovp-mode-art.is-greenscreen > span {
+  left: 34%;
+  bottom: 0;
+  width: 32%;
+  height: 72%;
+  border-radius: 45% 45% 0 0;
+}
+.ovp-pad {
+  position: relative;
+  width: 100%;
+  max-width: 340px;
+  margin: 0 auto;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  background: #0c0c10;
+  touch-action: none;
+}
+.ovp-pad-main {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.025) 0 8px, transparent 8px 16px), linear-gradient(135deg, #22222c, #15151b);
+  color: var(--text-3);
+  font-size: 10.5px;
+}
+.ovp-pad-thumb {
+  position: absolute;
+  background-size: cover;
+  background-position: center;
+  pointer-events: none;
+}
+.ovp-pad-layer {
+  position: absolute;
+  inset: 0;
+}
+.ovp-pad .ovh-box {
+  outline-color: var(--clip-overlay);
+}
+.ovp-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.ovp-color {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px 0 4px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.ovp-color input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.ovp-swatch {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--sw, #000);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+.ovp-keychip {
+  padding-left: 5px;
+}
+.ovp-tr + .ovp-tr {
+  margin-top: 8px;
+}
+
+/* ---------------------------------------------------------------------------------------------------------
+   Clip tools: speed tools, crop & rotate, title styles, voice-over recording
+   --------------------------------------------------------------------------------------------------------- */
+.insp-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 2px;
+}
+.insp-tools .insp-actions {
+  align-items: center;
+}
+.insp-replay-rate select {
+  height: 26px;
+  font-size: 11.5px;
+  padding-right: 22px;
+}
+.insp-rotate {
+  gap: 4px;
+}
+.insp-rotate .spacer {
+  flex: 1;
+}
+.insp-rotate-val {
+  min-width: 34px;
+  font-size: 11.5px;
+  color: var(--text-2);
+  text-align: center;
+}
+.insp-crop-pad {
+  position: relative;
+  margin: 0 auto;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #0c0c10;
+  border: 1px solid var(--line-strong);
+  touch-action: none;
+  user-select: none;
+}
+.insp-crop-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+}
+/* The kept part: everything outside it is dimmed (what the crop removes). Handles sit inside its corners so they
+   stay reachable when the crop touches the picture's edge. */
+.insp-crop-rect {
+  position: absolute;
+  z-index: 2;
+  border: 1.5px solid #fff;
+  box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.55);
+  cursor: move;
+  touch-action: none;
+}
+.insp-crop-third {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.28);
+}
+.insp-crop-third.is-v1,
+.insp-crop-third.is-v2 {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+.insp-crop-third.is-v1 {
+  left: 33.33%;
+}
+.insp-crop-third.is-v2 {
+  left: 66.66%;
+}
+.insp-crop-third.is-h1,
+.insp-crop-third.is-h2 {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+.insp-crop-third.is-h1 {
+  top: 33.33%;
+}
+.insp-crop-third.is-h2 {
+  top: 66.66%;
+}
+.insp-crop-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #fff;
+  border: 2px solid var(--accent);
+  border-radius: 2px;
+  touch-action: none;
+}
+.insp-crop-handle.is-nw {
+  left: -1px;
+  top: -1px;
+  cursor: nwse-resize;
+}
+.insp-crop-handle.is-ne {
+  right: -1px;
+  top: -1px;
+  cursor: nesw-resize;
+}
+.insp-crop-handle.is-sw {
+  left: -1px;
+  bottom: -1px;
+  cursor: nesw-resize;
+}
+.insp-crop-handle.is-se {
+  right: -1px;
+  bottom: -1px;
+  cursor: nwse-resize;
+}
+
+.insp-titles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(74px, 1fr));
+  gap: 6px;
+}
+.insp-title-style {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 10.5px;
+  cursor: pointer;
+  min-width: 0;
+}
+.insp-title-style:hover {
+  color: var(--text-0);
+  background: var(--bg-2);
+}
+.insp-title-style.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: #fff;
+}
+.insp-title-name {
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+/* Miniature of each style: where the text sits and how it looks. */
+.insp-title-swatch {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  border-radius: 5px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #2c3550, #4b3a5c);
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+.insp-title-swatch[data-preset='lower-third'] {
+  align-items: flex-end;
+  justify-content: flex-start;
+  padding: 0 0 6px 5px;
+  font-size: 9px;
+}
+.insp-title-swatch[data-preset='lower-third'] span {
+  background: rgba(0, 0, 0, 0.55);
+  padding: 1px 4px;
+  text-shadow: none;
+}
+.insp-title-swatch[data-preset='centered-bold'],
+.insp-title-swatch[data-preset='headline'] {
+  font-weight: 900;
+  font-size: 17px;
+}
+.insp-title-swatch[data-preset='cinematic'] {
+  font-family: 'Palatino Linotype', Palatino, Georgia, serif;
+  font-weight: 400;
+  box-shadow: inset 0 7px 0 #000, inset 0 -7px 0 #000;
+  text-shadow: none;
+}
+.insp-title-swatch[data-preset='subtitle'] {
+  align-items: flex-end;
+  padding-bottom: 4px;
+  font-size: 9px;
+}
+.insp-title-swatch[data-preset='subtitle'] span {
+  background: rgba(0, 0, 0, 0.6);
+  padding: 0 4px;
+}
+.insp-title-swatch[data-preset='typewriter'] {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-weight: 600;
+}
+.insp-title-swatch[data-preset='pop'] {
+  font-family: Impact, 'Arial Black', sans-serif;
+  color: #ffd166;
+  font-size: 17px;
+  -webkit-text-stroke: 0.6px #000;
+}
+.insp-title-swatch[data-preset='boxed'] span {
+  background: #fff;
+  color: #111;
+  padding: 1px 6px;
+  border-radius: 3px;
+  text-shadow: none;
+}
+.insp-title-swatch[data-preset='end'] {
+  font-family: 'Palatino Linotype', Palatino, Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+}
+.insp-title-swatch[data-preset='credits'] {
+  align-items: flex-start;
+  padding-top: 4px;
+  font-size: 9px;
+  background: linear-gradient(180deg, #111 0%, #222 100%);
+}
+
+/* Voice-over: count-in and REC badge over the program monitor. */
+.mon-vo {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #fff;
+}
+.mon-vo-count {
+  inset: 0;
+  flex-direction: column;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+.mon-vo-num {
+  font-size: 72px;
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: 0 4px 18px rgba(0, 0, 0, 0.6);
+  animation: pop-in 0.25s var(--ease);
+}
+.mon-vo-cancel,
+.mon-vo-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mon-vo-cancel:hover,
+.mon-vo-stop:hover {
+  background: rgba(0, 0, 0, 0.8);
+}
+.mon-vo-rec {
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 4px 3px 10px;
+  border-radius: 14px;
+  background: rgba(10, 10, 14, 0.78);
+  border: 1px solid rgba(255, 80, 80, 0.5);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+.mon-vo-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ff4d4f;
+  animation: mon-vo-blink 1s steps(2, start) infinite;
+}
+@keyframes mon-vo-blink {
+  to {
+    visibility: hidden;
+  }
+}
+.mon-mic.is-recording {
+  color: #ff6b6b;
+}
+.tl.is-narrow .tl-row-overlay .tl-row-head > .icon {
+  display: none; /* narrow header: room for "V2" and the + button */
+}

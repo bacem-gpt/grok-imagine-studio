@@ -99,7 +99,7 @@ function MarkField({ value, onCommit, fps = 30, max = Infinity, disabled = false
 }
 
 /** Picks / rejects + stars for one media item. */
-export function FlagControls({ media, size = 'md' }) {
+export function FlagControls({ media, size = 'md', onDelete = null }) {
   if (!media) return null;
   return html`<div class=${cx('src-flags', `is-${size}`)}>
     <button type="button" class=${cx('src-flag-btn', 'is-pick', media.flag === 'pick' && 'is-on')} title="Pick (P)" aria-pressed=${media.flag === 'pick'} onClick=${() => toggleFlag([media.id], 'pick')}>
@@ -109,6 +109,10 @@ export function FlagControls({ media, size = 'md' }) {
       <${Icon} name="x" size=${14} /><span>Reject</span>
     </button>
     <${Rating} value=${media.rating || 0} size=${size === 'lg' ? 18 : 15} onChange=${(n) => rateMedia([media.id], n)} />
+    ${onDelete &&
+    html`<button type="button" class="src-flag-btn is-delete" title="Delete from the bin and show the next clip (Del) — undo with Ctrl+Z" onClick=${onDelete} data-testid="src-delete">
+      <${Icon} name="trash" size=${14} /><span>Delete</span>
+    </button>`}
   </div>`;
 }
 
@@ -138,6 +142,11 @@ export function SourceMonitor({ active, orderedIds, variant = 'right', onVariant
   const prevId = neighborId(orderedIds, mediaId, -1, lastIndex.current);
   const nextId = neighborId(orderedIds, mediaId, 1, lastIndex.current);
   const go = (id) => id && openInSource(id, { select: true });
+  // Delete the clip on screen and move on to the next one (or the previous one at the end of the list).
+  const deleteAndNext = async () => {
+    const after = nextId || prevId;
+    if ((await removeFromBin([mediaId])) && after) go(after);
+  };
 
   const kind = m?.kind || 'video';
   const timed = kind !== 'image';
@@ -316,7 +325,7 @@ export function SourceMonitor({ active, orderedIds, variant = 'right', onVariant
         </div>
 
         <div class="src-info">
-          <${FlagControls} media=${m} />
+          <${FlagControls} media=${m} onDelete=${deleteAndNext} />
           ${m.prompt
             ? html`<div class=${cx('src-prompt', promptOpen && 'is-open')}>
                 <div class="src-prompt-text" title="Click to expand" onClick=${() => setPromptOpen(!promptOpen)}>${m.prompt}</div>

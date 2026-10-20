@@ -114,7 +114,7 @@ test('take decisions stick: Unlink, undo / redo of an auto-link and a studio rel
     const red = (await shots(t))[0].takes[0];
 
     // Unlink sticks: the watcher does not link it back.
-    await t.locator(`.pr-take[data-media-id="${red}"] .pr-take-foot [title="Unlink"]`).click();
+    await t.locator(`.pr-take[data-media-id="${red}"] .pr-take-foot [title^="Unlink"]`).click();
     await expect.poll(async () => (await shots(t))[0].takes).toEqual([]);
     await t.waitForTimeout(2000);
     expect((await shots(t))[0]).toMatchObject({ takes: [], status: 'sent' });
@@ -635,8 +635,8 @@ test('the prompt builder starts folded for a shot that has a prompt, open for a 
     await t.locator('.pr-card').first().click();
     const builder = t.locator('.pr-section[data-section="builder"]');
     await expect(builder).not.toHaveClass(/is-open/);
-    // The reference images (what goes to Grok with the prompt) come right after the prompt.
-    expect(await t.locator('.pr-editor-body > .pr-section').evaluateAll((els) => els.map((e) => e.dataset.section))).toEqual(['refs', 'builder', 'takes', 'details', 'variations']);
+    // The quick phrases and the reference images (what goes to Grok with the prompt) come right after the prompt.
+    expect(await t.locator('.pr-editor-body > .pr-section').evaluateAll((els) => els.map((e) => e.dataset.section))).toEqual(['phrases', 'refs', 'builder', 'takes', 'details', 'variations']);
 
     // A new shot has no prompt yet: the builder is open, and typing the first words doesn't fold it away.
     await t.locator('[data-testid="pr-new-shot"]').click();

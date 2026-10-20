@@ -171,7 +171,7 @@ export const projectStore = createProjectStore();
  * Transient UI state (not undoable). Persisted keys are listed in PERSISTED_UI_KEYS (saved by app-state.js).
  */
 export const uiStore = createStore({
-  tab: 'clips', // 'clips' | 'edit' | 'prompts' | 'ingredients'
+  tab: 'clips', // 'clips' | 'edit' | 'prompts' | 'dialogue' | 'ingredients'
   dock: 'right', // overlay dock mode reported by the content script
   selection: [], // selected clip ids (timeline)
   binSelection: [], // selected media ids (bin)
@@ -215,6 +215,8 @@ export const libraryStore = createStore({
   presets: [], // custom prompt-builder presets [{id, group, label, text}]
   ingredients: [], // [{id, name, kind:'image', mime, width, height, size, tags, note, origin, sourceUrl, createdAt}]
   templates: [], // saved prompt templates [{id, name, template, fields}]
+  phrases: [], // quick prompt phrases [{id, text, category, auto, createdAt}] (prompts/phrases.js)
+  phraseSets: [], // named phrase combinations [{id, name, texts, createdAt}]
 });
 
 /** Projects list for the picker [{id, name, updatedAt, duration, clipCount, mediaCount}]. */

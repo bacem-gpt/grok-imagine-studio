@@ -6,6 +6,8 @@
 //          badges (extra badges after the kind / flag ones), onScrub(fraction|null) — while scrubbing, the position
 //          (0..1) of the frame on screen.
 import { html, useState, useEffect, useRef } from '../../../vendor/preact-htm.mjs';
+import { partForMedia, splitLines } from '../../prompts/dialogue.js';
+import { shotForMedia, shotIndex } from '../../prompts/shots.js';
 import { getPreviews, getPeaks, retryMedia, onMediaEvent } from '../../core/media.js';
 import { formatDuration, clamp } from '../../core/utils.js';
 import { useProject } from '../hooks.js';
@@ -104,6 +106,20 @@ async function retry(e, id) {
   }
 }
 
+/** {short, title} naming the dialogue part (or else the shot) a media item is a take of; null when unlinked. */
+function takeLink(p, mediaId) {
+  if (!p.media[mediaId]?.shotId) return null;
+  const part = partForMedia(p, mediaId);
+  if (part) {
+    const firstLine = splitLines(part.part.text)[0] || '';
+    return { short: `P${part.index + 1}`, title: `Dialogue part ${part.index + 1}${firstLine ? ` — ${firstLine}` : ''}` };
+  }
+  const shot = shotForMedia(p, mediaId);
+  if (!shot) return null;
+  const n = shotIndex(p, shot.id) + 1;
+  return { short: `S${n}`, title: `Take of shot ${n}${shot.title ? ` · ${shot.title}` : ''}` };
+}
+
 export function MediaThumb({
   mediaId,
   scrub = true,
@@ -118,6 +134,8 @@ export function MediaThumb({
 }) {
   const media = useProject((p) => p.media[mediaId] || null);
   const usage = useProject((p) => (showUsage ? mediaUsageCounts(p).get(mediaId) || 0 : 0));
+  // Which dialogue part / shot this take belongs to ("P3" / "S5"), so a video is recognisable anywhere.
+  const link = useProject((p) => takeLink(p, mediaId));
   const status = media?.status || 'error';
   const loading = status === 'pending' || status === 'loading';
   const previews = usePreviews(mediaId, !!media && status !== 'error');
@@ -166,6 +184,7 @@ export function MediaThumb({
       ${showKind && html`<span class=${cx('clips-thumb-kind', `is-${kind}`)} title=${kind}><${Icon} name=${KIND_ICON[kind] || 'film'} size=${11} /></span>`}
       ${showFlag && media.flag === 'pick' && html`<span class="clips-thumb-flag is-pick" title="Picked"><${Icon} name="check" size=${11} /></span>`}
       ${showFlag && media.flag === 'reject' && html`<span class="clips-thumb-flag is-reject" title="Rejected"><${Icon} name="x" size=${11} /></span>`}
+      ${link && html`<span class="clips-thumb-part" title=${link.title}>${link.short}</span>`}
       ${badges}
     </div>
     ${usage > 0 &&

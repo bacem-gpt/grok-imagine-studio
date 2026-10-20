@@ -42,7 +42,7 @@ async function contentWorld(page) {
   return async (expression) => {
     for (let i = 0; i < 150; i++) {
       const { frameTree } = await cdp.send('Page.getFrameTree');
-      const ctx = [...contexts.values()].reverse().find((c) => c.auxData?.frameId === frameTree.frame.id && c.auxData?.type === 'isolated' && c.name === 'Grok Imagine Studio');
+      const ctx = [...contexts.values()].reverse().find((c) => c.auxData?.frameId === frameTree.frame.id && c.auxData?.type === 'isolated' && c.name === 'Imagine Studio for Grok');
       if (ctx) {
         const r = await cdp.send('Runtime.evaluate', { expression, contextId: ctx.id, awaitPromise: true, returnByValue: true });
         if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);

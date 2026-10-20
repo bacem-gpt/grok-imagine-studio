@@ -98,6 +98,12 @@ export const ICONS = {
   'chevrons-right': '<path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/>',
   rewind: '<path d="M11 19 2 12l9-7v14z"/><path d="m22 19-9-7 9-7v14z"/>',
   'fast-forward': '<path d="m13 19 9-7-9-7v14z"/><path d="m2 19 9-7-9-7v14z"/>',
+  pip: '<rect x="2" y="4" width="20" height="16" rx="2"/><rect x="12" y="7" width="7" height="5" rx="1"/>',
+  pipette: '<path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4z"/>',
+  mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 17v4"/><path d="M8 21h8"/>',
+  'rotate-ccw': '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
+  'flip-v': '<path d="M3 12h18"/><path d="m7 8 5-4 5 4z"/><path d="m7 16 5 4 5-4z"/>',
+  snowflake: '<path d="M12 2v20"/><path d="m4.9 7 14.2 10"/><path d="m4.9 17 14.2-10"/><path d="m9 4 3 2 3-2"/><path d="m9 20 3-2 3 2"/>',
 };
 
 export function iconMarkup(name) {

@@ -509,7 +509,7 @@ test('narrow 480 px layout: pane switcher, editor back button, library pane, no 
     await expect(t.locator('.pr-card')).toContainText('A lighthouse in a storm');
     await t.locator('.pr-nav button', { hasText: 'Library' }).click();
     await expect(t.locator('.pr-col-lib')).toBeVisible();
-    await expect(t.locator('.pr-lib-tabs .tab')).toHaveCount(4);
+    await expect(t.locator('.pr-lib-tabs .tab')).toHaveCount(5);
     for (const label of [/^Shots/, /^Editor$/, /^Library$/]) {
       await t.locator('.pr-nav button', { hasText: label }).click();
       const overflow = await t.evaluate(() => {

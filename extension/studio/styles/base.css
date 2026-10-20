@@ -422,6 +422,11 @@ a {
     gap: 5px;
   }
 }
+@media (max-width: 800px) and (min-width: 681px) {
+  .app-tabs .tab .icon {
+    display: none; /* five tab names fit at half a laptop window once the icons give way */
+  }
+}
 @media (max-width: 680px) and (min-width: 561px) {
   .app-tabs .tab:not(.is-active) .tab-label {
     display: none;

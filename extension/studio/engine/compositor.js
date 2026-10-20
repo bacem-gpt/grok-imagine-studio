@@ -13,7 +13,8 @@
 import { videoItemsAt, textItemsAt, sourceTimeAt, fadeFactor, transitionProgress } from '../core/model.js';
 import { EPS } from '../core/utils.js';
 import { TRANSITION_RENDERERS } from './transitions.js';
-import { buildFilter, drawVignette, applyKenBurns, fitRect, drawTextItem, easeInOut } from './effects.js';
+import { buildFilter, drawVignette, applyKenBurns, drawTextItem, easeInOut, drawClipSource, gradeGains, gradeLayer, applyChannelGains } from './effects.js';
+import { drawOverlays } from './overlays.js';
 
 function makeCanvas(w, h) {
   if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h);
@@ -72,19 +73,27 @@ export function drawItem(ctx, item, t, source, W, H, mods = {}) {
     if (mods.scale && mods.scale !== 1) ctx.scale(mods.scale, mods.scale);
     ctx.translate(-W / 2, -H / 2);
   }
-  ctx.save(); // Ken Burns applies to the picture only, not to the vignette
-  if (clip.kenBurns) applyKenBurns(ctx, clip.kenBurns, item.duration > 0 ? (t - item.start) / item.duration : 0, W, H);
-  ctx.filter = buildFilter(clip.filters, H, mods.blur || 0);
-  const r = fitRect(source.width, source.height, W, H, clip.fit || 'cover');
+  // White balance (temperature / tint) grades the picture on its own layer, so the letterbox and whatever is under
+  // the clip (the other side of a transition) stay untouched; the layer is then drawn with the transition modifiers.
+  const gains = gradeGains(clip.filters);
+  const layer = gains ? gradeLayer(W, H) : null;
+  const g = layer ? layer.getContext('2d') : ctx;
+  g.save(); // Ken Burns applies to the picture only, not to the vignette
+  if (clip.kenBurns) applyKenBurns(g, clip.kenBurns, item.duration > 0 ? (t - item.start) / item.duration : 0, W, H);
+  g.filter = buildFilter(clip.filters, H, mods.blur || 0);
   try {
-    ctx.drawImage(source.image, r.x, r.y, r.w, r.h);
+    drawClipSource(g, source, clip, W, H, clip.fit || 'cover'); // crop, rotation and mirroring, then the fit
   } catch {
     // Source not decodable yet (e.g. video with readyState < 2): treat as not ready.
-    ctx.restore();
+    g.restore();
     ctx.restore();
     return false;
   }
-  ctx.restore();
+  g.restore();
+  if (layer) {
+    applyChannelGains(layer, gains);
+    ctx.drawImage(layer, 0, 0);
+  }
   const vig = clip.filters?.vignette || 0;
   if (vig) drawVignette(ctx, W, H, vig);
   ctx.restore();
@@ -162,6 +171,9 @@ export function drawFrame(ctx, { project, layout, t, getSource, scratch = defaul
       renderer(r);
     }
   }
+
+  // Overlay track (picture in picture, cutaway, side by side, green screen): above the main track, below titles.
+  if (!drawOverlays(ctx, { project, layout, t, getSource, scratch }).ready) ready = false;
 
   for (const ti of textItemsAt(layout.text, t).sort((x, y) => (x.clip.lane || 0) - (y.clip.lane || 0))) {
     drawTextItem(ctx, ti, t, W, H);

@@ -563,28 +563,46 @@ export async function renameMedia(id) {
   projectStore.update((p) => M.updateMedia(p, id, { name: clean }), { label: 'Rename' });
 }
 
-/** Removes media from the bin (and their timeline clips) after confirmation; undoable. Returns true if removed. */
-export async function removeFromBin(ids) {
+/**
+ * Removes media from the bin (and their timeline clips) in one step — no confirmation: the toast offers Undo and
+ * Ctrl+Z restores everything. opts.confirm asks first (bulk clean-ups). Returns true if removed.
+ */
+export async function removeFromBin(ids, { confirm = false } = {}) {
   const p = projectStore.get();
   const list = ids.filter((id) => p?.media[id]);
   if (!list.length) return false;
   const uses = list.reduce((n, id) => n + M.mediaUsage(p, id).length, 0);
   const what = list.length === 1 ? `"${snippet(displayTitle(p.media[list[0]]), 60)}"` : `These ${list.length} items`;
-  const ok = await confirmDialog({
-    title: list.length === 1 ? 'Remove from bin?' : `Remove ${list.length} items from the bin?`,
-    message: `${what} will be removed from the bin${uses ? `, together with ${pluralize(uses, 'clip')} using ${list.length === 1 ? 'it' : 'them'} on the timeline` : ''}.\nYou can undo this with Ctrl+Z.`,
-    confirmLabel: 'Remove',
-    danger: true,
-  });
-  if (!ok) return false;
-  const label = list.length === 1 ? 'Remove from bin' : `Remove ${list.length} items`;
+  if (confirm) {
+    const ok = await confirmDialog({
+      title: list.length === 1 ? 'Delete from bin?' : `Delete ${list.length} items from the bin?`,
+      message: `${what} will be removed from the bin${uses ? `, together with ${pluralize(uses, 'clip')} using ${list.length === 1 ? 'it' : 'them'} on the timeline` : ''}.\nYou can undo this with Ctrl+Z.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return false;
+  }
+  const label = list.length === 1 ? 'Delete from bin' : `Delete ${list.length} items`;
   projectStore.update((q) => M.removeMedia(q, list), { label });
   const gone = new Set(list);
   uiStore.set((s) => ({ ...s, binSelection: s.binSelection.filter((id) => !gone.has(id)), ...(gone.has(s.sourceMediaId) ? { sourceMediaId: null } : {}) }));
-  toast(`Removed ${pluralize(list.length, 'item')}`, {
+  toast(`Deleted ${list.length === 1 ? snippet(displayTitle(p.media[list[0]]), 40) : pluralize(list.length, 'item')}${uses ? ` and ${pluralize(uses, 'timeline clip')}` : ''}`, {
+    duration: 7000,
     action: { label: 'Undo', run: () => projectStore.undoLabel() === label && projectStore.undo() },
   });
   return true;
+}
+
+/** Bin clean-ups: ids of rejected items, of items on no timeline track, and of failed downloads. */
+export function cleanupCandidates(p = projectStore.get()) {
+  const ids = p?.mediaOrder || [];
+  const used = new Set();
+  for (const track of Object.values(p?.tracks || {})) for (const c of track || []) if (c.mediaId) used.add(c.mediaId);
+  return {
+    rejected: ids.filter((id) => p.media[id]?.flag === 'reject'),
+    unused: ids.filter((id) => !used.has(id)),
+    failed: ids.filter((id) => p.media[id]?.status === 'error'),
+  };
 }
 
 const SUPPORTED_FILE = /\.(mp4|m4v|webm|mov|mkv|jpe?g|png|webp|gif|avif|mp3|wav|m4a|aac|ogg|oga|opus|flac)$/i;
@@ -742,6 +760,13 @@ export function mediaMenuItems(id, { ids = [id], frameTime = 0, extra = [] } = {
     !multi && { label: 'Open in source monitor', icon: 'maximize', shortcut: 'enter', onClick: () => requestSourceOpen(id) },
     { label: multi ? `Add ${n} to timeline` : 'Add to timeline', icon: 'plus', shortcut: 'e', disabled: allFailed, onClick: () => addToTimeline(ids) },
     !multi && m.kind !== 'image' && { label: 'Add as audio clip', icon: 'music', disabled: !canBeAudio(m), onClick: () => addAsAudio(id) },
+    m.kind !== 'audio' && {
+      label: multi ? `Add ${n} as overlays at the playhead` : 'Add as overlay (picture in picture)',
+      icon: 'layers',
+      disabled: allFailed,
+      // Loaded on demand: the Edit tab's actions module is not needed for the bin.
+      onClick: () => import('../edit/actions.js').then((A) => A.placeAsOverlay(ids, uiStore.get().playhead || 0)),
+    },
     !multi &&
       m.kind !== 'audio' && {
         label: m.kind === 'image' ? 'Copy to Ingredients' : 'Grab frame → Ingredients',
@@ -763,7 +788,7 @@ export function mediaMenuItems(id, { ids = [id], frameTime = 0, extra = [] } = {
     !multi && '-',
     { label: multi ? `Download ${n} originals` : 'Download original', icon: 'download', onClick: () => downloadMedia(ids) },
     !multi && { label: 'Rename…', icon: 'edit', onClick: () => renameMedia(id) },
-    { label: multi ? `Remove ${n} from bin` : 'Remove from bin', icon: 'trash', danger: true, shortcut: 'delete', onClick: () => removeFromBin(ids) },
+    { label: multi ? `Delete ${n} from bin` : 'Delete from bin', icon: 'trash', danger: true, shortcut: 'delete', onClick: () => removeFromBin(ids) },
   ];
 }
 

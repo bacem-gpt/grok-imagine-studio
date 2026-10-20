@@ -128,16 +128,26 @@ export function laneCounts(project) {
   };
 }
 
+/** Number of overlay lanes to show (V2, V3…; at least one so media can be dropped there). */
+export function overlayLaneCount(project) {
+  return Math.max(1, (project.tracks.overlay || []).reduce((m, c) => Math.max(m, Math.floor(c.lane || 0)), -1) + 1);
+}
+
 /**
- * Vertical geometry of the track area: text lanes on top (highest lane first), the main video track, then audio
- * lanes A1..An. Returns {rows: [{kind, lane, top, height, label}], videoTop, height, laneTop(kind, lane)}.
+ * Vertical geometry of the track area: text lanes on top (highest lane first), overlay lanes V2..Vn (highest first,
+ * only when `overlay` > 0), the main video track V1, then audio lanes A1..An.
+ * Returns {rows: [{kind, lane, top, height, label}], videoTop, height, laneTop(kind, lane)}.
  */
-export function trackGeometry({ text, audio }, { textH = 30, videoH = 64, audioH = 44, extraAudio = 0 } = {}) {
+export function trackGeometry({ text, audio, overlay = 0 }, { textH = 30, videoH = 64, audioH = 44, overlayH = 44, extraAudio = 0, extraOverlay = 0 } = {}) {
   const rows = [];
   let y = 0;
   for (let lane = text - 1; lane >= 0; lane--) {
     rows.push({ kind: 'text', lane, top: y, height: textH, label: `T${lane + 1}` });
     y += textH;
+  }
+  for (let lane = overlay + extraOverlay - 1; lane >= 0; lane--) {
+    rows.push({ kind: 'overlay', lane, top: y, height: overlayH, label: `V${lane + 2}`, extra: lane >= overlay });
+    y += overlayH;
   }
   const videoTop = y;
   rows.push({ kind: 'video', lane: 0, top: y, height: videoH, label: 'V1' });
@@ -166,8 +176,8 @@ export function rowAt(geometry, y) {
 export function laneAt(geometry, kind, y) {
   const lanes = geometry.rows.filter((r) => r.kind === kind);
   if (!lanes.length) return 0;
-  if (kind === 'text') {
-    // text lanes are drawn highest-first: the topmost row is the highest lane
+  if (kind === 'text' || kind === 'overlay') {
+    // text and overlay lanes are drawn highest-first: the topmost row is the highest lane
     const top = lanes[0].top;
     const bottom = lanes[lanes.length - 1].top + lanes[lanes.length - 1].height;
     if (y < top) return lanes[0].lane + 1;
@@ -209,6 +219,7 @@ export function snapCandidates(project, excludeIds = [], extra = []) {
       video: project.tracks.video,
       audio: project.tracks.audio.filter((c) => !ex.has(c.id)),
       text: project.tracks.text.filter((c) => !ex.has(c.id)),
+      overlay: (project.tracks.overlay || []).filter((c) => !ex.has(c.id)),
     },
   };
   return snapPoints(filtered, extra);

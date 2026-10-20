@@ -12,6 +12,7 @@ import { promptSimilarity } from '../../prompts/match.js';
 import { PrSection, TakeThumb, useShotInBox } from './common.js';
 import { promptsUi, setUi, prefsStore, setPrefs, expandPrompt, linkTakesByHand, unlinkTakeByHand } from './state.js';
 import { linkCandidates } from './take-watcher.js';
+import { removeFromBin } from '../media/actions.js';
 
 const openInSource = (mediaId) => appEvents.emit('source.open', { mediaId });
 
@@ -26,7 +27,8 @@ function TakeCard({ shot, mediaId, chosen, index }) {
       { label: chosen ? 'Clear choice' : 'Use this take', icon: 'star', onClick: choose },
       { label: 'Open in source monitor', icon: 'eye', onClick: () => openInSource(mediaId) },
       '-',
-      { label: 'Unlink from shot', icon: 'x', danger: true, onClick: unlink },
+      { label: 'Unlink from shot', icon: 'x', onClick: unlink },
+      { label: 'Delete this video', icon: 'trash', danger: true, onClick: () => removeFromBin([mediaId]) },
     ]);
   return html`<div class=${cx('pr-take', chosen && 'is-chosen', failed && 'is-failed')} data-media-id=${mediaId} onContextMenu=${menu}>
     <button type="button" class="pr-take-media" title=${failed ? `Download failed: ${media.error || 'unknown error'} — retry it in the Clips tab. Assemble skips it.` : 'Double-click to open in the source monitor'} onClick=${choose} onDblClick=${() => openInSource(mediaId)}>
@@ -37,7 +39,8 @@ function TakeCard({ shot, mediaId, chosen, index }) {
       <span class="pr-take-name" title=${media.prompt || media.name}>Take ${index + 1}${failed ? ' · failed' : media.duration ? ` · ${formatDuration(media.duration)}` : ''}</span>
       <${IconButton} icon=${chosen ? 'star-filled' : 'star'} size="sm" title=${chosen ? 'Chosen take (click to clear)' : 'Use this take in the sequence'} active=${chosen} onClick=${choose} />
       <${IconButton} icon="eye" size="sm" title="Open in the source monitor" onClick=${() => openInSource(mediaId)} />
-      <${IconButton} icon="x" size="sm" kind="danger" title="Unlink" onClick=${unlink} />
+      <${IconButton} icon="x" size="sm" title="Unlink from this shot (the video stays in the bin)" onClick=${unlink} />
+      <${IconButton} icon="trash" size="sm" kind="danger" title="Delete this video (undo with Ctrl+Z)" onClick=${() => removeFromBin([mediaId])} />
     </div>
   </div>`;
 }

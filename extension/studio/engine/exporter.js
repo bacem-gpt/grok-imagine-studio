@@ -19,7 +19,7 @@
 // Pure helpers (planning, bitrates, ranges, validation) are exported for the dialog and unit tests;
 // core/media.js is imported lazily so this module stays importable from node.
 
-import { layoutProject, videoItemsAt, sourceTimeAt } from '../core/model.js';
+import { layoutProject, videoItemsAt, sourceTimeAt, overlayItemsAt, layoutItemKey } from '../core/model.js';
 import { clamp, sanitizeFilename, formatTime, formatDuration } from '../core/utils.js';
 import { openVideoFrames, retagSample } from '../core/video-color.js';
 import { drawFrame, createScratch } from './compositor.js';
@@ -83,18 +83,20 @@ export function resolveRange(range, duration) {
 }
 
 /**
- * Frame plan for rendering [start, end) at fps: the frame count and, per main-track layout item, the frames it
- * is visible in plus the source timestamps those frames need (non-decreasing). Uses videoItemsAt() exactly like
- * drawFrame(), so decoders stay in lockstep with the compositor.
+ * Frame plan for rendering [start, end) at fps: the frame count and, per layout item (main track, then overlay
+ * track), the frames it is visible in plus the source timestamps those frames need (non-decreasing). Uses
+ * videoItemsAt() / overlayItemsAt() exactly like drawFrame(), so decoders stay in lockstep with the compositor.
+ * Entries carry `key` = layoutItemKey(item) (main-track index, or `ov:<clip id>`), the key frames are looked up by.
  */
 export function planFrames(layout, { start, end, fps }) {
   const frames = Math.max(1, Math.round((end - start) * fps));
   const byIndex = new Map();
   for (let k = 0; k < frames; k++) {
     const t = start + k / fps;
-    for (const item of videoItemsAt(layout.video, t)) {
-      let entry = byIndex.get(item.index);
-      if (!entry) byIndex.set(item.index, (entry = { item, first: k, last: k, times: [] }));
+    for (const item of [...videoItemsAt(layout.video, t), ...overlayItemsAt(layout.overlay, t)]) {
+      const key = layoutItemKey(item);
+      let entry = byIndex.get(key);
+      if (!entry) byIndex.set(key, (entry = { item, key, first: k, last: k, times: [] }));
       entry.last = k;
       entry.times.push(sourceTimeAt(item, t));
     }
@@ -124,6 +126,7 @@ export function exportProblems(project, { start = 0, end = Infinity, video = tru
   const overlaps = (it) => it.end > start + 1e-6 && it.start < end - 1e-6;
   for (const it of lay.video) if (overlaps(it) && (video || mainClipAudible(project, it.clip))) ids.add(it.clip.mediaId);
   if (audio) for (const it of lay.audio) if (overlaps(it) && audioClipAudible(project, it.clip)) ids.add(it.clip.mediaId);
+  for (const it of lay.overlay || []) if (overlaps(it) && (video || (audio && mainClipAudible(project, it.clip)))) ids.add(it.clip.mediaId);
   const out = [];
   for (const id of ids) {
     const m = project.media[id];
@@ -148,7 +151,8 @@ export function exportProblems(project, { start = 0, end = Infinity, video = tru
 export function pictureTail(project, { start = 0, end = Infinity } = {}) {
   const lay = layoutProject(project);
   const stop = Math.min(end, lay.duration);
-  const from = clamp(lay.videoEnd, start, stop);
+  const pictureEnd = Math.max(lay.videoEnd, ...(lay.overlay || []).map((it) => it.end)); // overlays are pictures too
+  const from = clamp(pictureEnd, start, stop);
   if (!(stop - from > 1e-6)) return null;
   const over = (it) => it.end > from + 1e-6 && it.start < stop - 1e-6;
   return {
@@ -156,7 +160,7 @@ export function pictureTail(project, { start = 0, end = Infinity } = {}) {
     duration: stop - from,
     sound: lay.audio.some((it) => over(it) && audioClipAudible(project, it.clip)),
     titles: lay.text.some(over),
-    clips: lay.videoEnd > start + 1e-6,
+    clips: pictureEnd > start + 1e-6,
   };
 }
 
@@ -416,6 +420,32 @@ function frameSource(frame) {
 }
 
 /**
+ * Samples for output timestamps in any order (a reversed clip's run backwards, a freeze frame's repeat): every
+ * `window` output frames are decoded in one forward samplesAtTimestamps() pass over their distinct timestamps
+ * (sorted), so a GOP is decoded once per window instead of once per frame, then handed out in the requested order.
+ * Yields VideoSample | null (the caller owns and closes each); at most `window` decoded frames are held at a time.
+ * @param {{samplesAtTimestamps: (t: number[]) => AsyncIterable<Object|null>}} sink  Mediabunny VideoSampleSink
+ * @param {number[]} times  source seconds, in output order
+ */
+export async function* orderedSamples(sink, times, { window = 30 } = {}) {
+  for (let i = 0; i < times.length; i += window) {
+    const block = times.slice(i, i + window);
+    const uniq = [...new Set(block)].sort((a, b) => a - b);
+    const got = new Map();
+    try {
+      let k = 0;
+      for await (const sample of sink.samplesAtTimestamps(uniq)) got.set(uniq[k++], sample);
+      for (const t of block) {
+        const sample = got.get(t);
+        yield sample ? sample.clone() : null;
+      }
+    } finally {
+      for (const sample of got.values()) sample?.close();
+    }
+  }
+}
+
+/**
  * Streams the frames one main-track clip needs, in output order. When the decoder has nothing for a frame (data
  * missing from a truncated file, a damaged packet) the last good frame stands in, and `gap` records it.
  */
@@ -449,7 +479,10 @@ class ClipStream {
     this.retag = retag;
     // A hair past each target so float rounding never selects the previous frame.
     const times = this.entry.times.map((t) => Math.max(first, t) + 1e-4);
-    this.iter = sink.samplesAtTimestamps(times)[Symbol.asyncIterator]();
+    // Reversed clips need their timestamps backwards and freeze frames one timestamp over and over: both decode in
+    // forward windows (orderedSamples) instead of one decode from the previous keyframe per frame.
+    const clip = this.entry.item.clip;
+    this.iter = (clip.reverse || clip.freeze ? orderedSamples(sink, times) : sink.samplesAtTimestamps(times))[Symbol.asyncIterator]();
   }
 
   /** Next frame: {bitmap} | {sample, owner} | null. The caller closes it with closeFrame(). */
@@ -565,7 +598,7 @@ export async function exportProject(project, opts = {}) {
   const total = plan.frames;
   const audible = includeAudio && hasAudibleContent(project, { start, end });
   // Retimed clip sound goes through the (slower) pitch-preserving stretch: give the audio stage more of the bar.
-  const retimedSound = audible && layout.video.some((it) => it.end > start && it.start < end && mainClipAudible(project, it.clip) && Math.abs((it.clip.speed || 1) - 1) > 1e-3);
+  const retimedSound = audible && [...layout.video, ...layout.overlay].some((it) => it.end > start && it.start < end && mainClipAudible(project, it.clip) && Math.abs((it.clip.speed || 1) - 1) > 1e-3);
   const weights = { prepare: 0.02, audio: audible ? (retimedSound ? 0.2 : 0.08) : 0.02, video: 0.97 };
   const warnings = [];
   const warn = (w) => {
@@ -605,7 +638,7 @@ export async function exportProject(project, opts = {}) {
   const audioBitrate = Math.round(opts.audioBitrate || audioBitrateFor(quality));
 
   let output = null;
-  const streams = new Map(); // layout index -> ClipStream
+  const streams = new Map(); // layoutItemKey -> ClipStream
   const stills = new StillCache((mediaId) => decodeImage(project, mediaId, W, H));
   let audioIds = [];
   try {
@@ -617,6 +650,7 @@ export async function exportProject(project, opts = {}) {
       const plannedIds = new Set();
       for (const it of layout.video) if (mainClipAudible(project, it.clip)) plannedIds.add(it.clip.mediaId);
       for (const it of layout.audio) if (audioClipAudible(project, it.clip)) plannedIds.add(it.clip.mediaId);
+      for (const it of layout.overlay) if (mainClipAudible(project, it.clip)) plannedIds.add(it.clip.mediaId);
       audioIds = [...plannedIds];
       mix = await renderAudioMix(project, {
         start,
@@ -684,14 +718,14 @@ export async function exportProject(project, opts = {}) {
       while (nextToOpen < plan.items.length && plan.items[nextToOpen].first <= k + openAhead) {
         const entry = plan.items[nextToOpen++];
         const stream = new ClipStream({ MB, project, entry, stills });
-        streams.set(entry.item.index, stream);
+        streams.set(entry.key, stream);
         active.push(stream);
       }
       const frames = new Map();
       try {
-        for (const s of active) if (s.entry.first <= k && s.entry.last >= k) frames.set(s.entry.item.index, await s.next());
+        for (const s of active) if (s.entry.first <= k && s.entry.last >= k) frames.set(s.entry.key, await s.next());
         const t = start + k / fps;
-        drawFrame(ctx, { project, layout, t, getSource: (item) => frameSource(frames.get(item.index)), scratch });
+        drawFrame(ctx, { project, layout, t, getSource: (item) => frameSource(frames.get(layoutItemKey(item))), scratch });
       } finally {
         for (const f of frames.values()) closeFrame(f);
       }
@@ -700,7 +734,7 @@ export async function exportProject(project, opts = {}) {
       if (done.length) {
         active = active.filter((s) => s.entry.last > k);
         for (const s of done) {
-          streams.delete(s.entry.item.index);
+          streams.delete(s.entry.key);
           reportGap(s);
           s.close();
         }
@@ -776,7 +810,7 @@ export async function exportFrame(project, t, { width, height, type = 'image/png
   const W = Math.round(clamp(Number(width) || project.settings?.width || 1280, 1, MAX_DIM));
   const H = Math.round(clamp(Number(height) || project.settings?.height || 720, 1, MAX_DIM));
   const tt = clamp(Number(t) || 0, 0, Math.max(0, layout.duration - 1e-3));
-  const items = videoItemsAt(layout.video, tt);
+  const items = [...videoItemsAt(layout.video, tt), ...overlayItemsAt(layout.overlay, tt)];
   const problems = exportProblems(project, { start: tt, end: tt + 1e-3, audio: false });
   if (problems.length) throw new Error(problems[0].message);
   const MB = items.some((it) => project.media[it.clip.mediaId]?.kind !== 'image') ? await loadMB() : null;
@@ -795,7 +829,7 @@ export async function exportFrame(project, t, { width, height, type = 'image/png
     for (const item of items) {
       const mediaId = item.clip.mediaId;
       if (project.media[mediaId]?.kind === 'image') {
-        frames.set(item.index, { bitmap: await decodeImage(project, mediaId, W, H), ownsBitmap: true });
+        frames.set(layoutItemKey(item), { bitmap: await decodeImage(project, mediaId, W, H), ownsBitmap: true });
         throwIfAborted(signal);
         continue;
       }
@@ -810,12 +844,12 @@ export async function exportFrame(project, t, { width, height, type = 'image/png
         sample = await sink.getSample(first);
       }
       if (sample && retag) sample = await retagSample(MB, sample, {});
-      if (sample) frames.set(item.index, { sample, owner: {} });
+      if (sample) frames.set(layoutItemKey(item), { sample, owner: {} });
       throwIfAborted(signal);
     }
     const canvas = new OffscreenCanvas(W, H);
     const ctx = canvas.getContext('2d', { alpha: false });
-    drawFrame(ctx, { project, layout, t: tt, getSource: (item) => frameSource(frames.get(item.index)), scratch: createScratch() });
+    drawFrame(ctx, { project, layout, t: tt, getSource: (item) => frameSource(frames.get(layoutItemKey(item))), scratch: createScratch() });
     release(); // decoders and frames aren't needed for the (possibly slow) image encode
     throwIfAborted(signal);
     const blob = await canvas.convertToBlob({ type, quality });
@@ -856,7 +890,14 @@ export async function exportAudioWav(project, { range = null, sampleRate = DEFAU
     }
   };
   const MIX_SHARE = 0.92;
-  const ids = [...new Set(layout.video.filter((it) => mainClipAudible(project, it.clip)).map((it) => it.clip.mediaId).concat(layout.audio.filter((it) => audioClipAudible(project, it.clip)).map((it) => it.clip.mediaId)))];
+  const ids = [
+    ...new Set(
+      [...layout.video, ...layout.overlay]
+        .filter((it) => mainClipAudible(project, it.clip))
+        .map((it) => it.clip.mediaId)
+        .concat(layout.audio.filter((it) => audioClipAudible(project, it.clip)).map((it) => it.clip.mediaId)),
+    ),
+  ];
   try {
     report(0, 'audio');
     const buffer = await renderAudioMix(project, { start, end, sampleRate, signal, onWarning, onProgress: (f) => report(f * MIX_SHARE, 'audio') });

@@ -18,6 +18,7 @@ import { getBible } from '../../prompts/library.js';
 import { promptSimilarity } from '../../prompts/match.js';
 import { createQueueRunner } from '../../prompts/queue.js';
 import { collapseSpaces, normalizeForMatch } from '../../prompts/text.js';
+import { autoPhrasePrompt } from '../../prompts/phrases.js';
 
 // ---------------------------------------------------------------------------------------------------------
 // Preferences (per browser profile; conveniences only, never project data)
@@ -33,7 +34,9 @@ const DEFAULT_PREFS = {
   queueDelay: 8, // seconds between batch sends
   queueTimeout: 240, // seconds to wait for a generation
   queueWait: true, // wait for a new video before sending the next shot
-  libraryTab: 'snippets',
+  libraryTab: 'phrases',
+  phraseJoin: 'sentence', // how quick phrases are added to a prompt: 'sentence' | 'comma'
+  phraseCat: 'all', // phrase board category filter
   // Section open states the user chose. No `builder` entry = automatic: open for a shot without a prompt.
   sections: { refs: true, takes: true, details: false, variations: false },
   assembleReplace: false,
@@ -130,6 +133,11 @@ export const expandPrompt = (text, p = project()) => expandTokens(text || '', ex
 /** Adds a shot after the selected one (or at the end) and opens it. Returns the new id. */
 export function newShot(partial = {}, { focus = 'prompt', atEnd = false } = {}) {
   const p = project();
+  // Phrases the user marked "start every new shot with it" (Library → Phrases).
+  if (partial.prompt == null) {
+    const auto = autoPhrasePrompt(libraryStore.get().phrases, { join: prefsStore.get().phraseJoin === 'comma' ? 'comma' : 'sentence' });
+    if (auto) partial = { ...partial, prompt: auto };
+  }
   const idx = S.shotIndex(p, promptsUi.get().selectedId);
   let id = null;
   projectStore.update(
@@ -730,9 +738,9 @@ function waitForMedia(ids, timeoutMs = 90000) {
  * Builds the main track from the shots' chosen (or first) takes, in shot order. Waits for takes that are still
  * downloading so clips get their real duration.
  */
-export async function assembleFromShots({ replace = false, transition = null, approvedOnly = false, onWait = null } = {}) {
+export async function assembleFromShots({ replace = false, transition = null, approvedOnly = false, onWait = null, order = null } = {}) {
   const p = project();
-  const { mediaIds } = S.takesInShotOrder(p, { approvedOnly });
+  const { mediaIds } = S.takesInShotOrder(p, { approvedOnly, order });
   if (!mediaIds.length) {
     toast(approvedOnly ? 'No approved shot has a take yet' : 'No shot has a take yet — send shots to Grok or link clips from the bin', { kind: 'warn', duration: 5000 });
     return null;
@@ -745,7 +753,7 @@ export async function assembleFromShots({ replace = false, transition = null, ap
   let result = null;
   projectStore.update(
     (q) => {
-      result = S.assembleTimeline(q, { replace, transition, approvedOnly });
+      result = S.assembleTimeline(q, { replace, transition, approvedOnly, order });
       return result.project;
     },
     { label: 'Assemble timeline from shots' },

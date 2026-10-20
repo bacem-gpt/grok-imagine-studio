@@ -522,7 +522,7 @@ test('BinCompact: drag payload, picked-only filter, "+" appends, double-click op
   }
 });
 
-test('remove from bin asks for confirmation, takes timeline clips along, and undo restores everything', async () => {
+test('delete from bin is one step (no confirmation), takes timeline clips along, and undo restores everything', async () => {
   const ctx = await launch();
   try {
     const page = await openStudioTab(ctx);
@@ -531,17 +531,9 @@ test('remove from bin asks for confirmation, takes timeline clips along, and und
     await card(page, red).click();
     await card(page, green).click({ modifiers: ['Control'] });
     await page.keyboard.press('Delete');
-    const dialog = page.locator('.modal');
-    await expect(dialog).toContainText('Remove 2 items from the bin?');
-    await expect(dialog).toContainText('2 clips');
-    await dialog.locator('button', { hasText: 'Cancel' }).click();
-    expect(Object.keys((await getProject(page)).media)).toHaveLength(3);
-
-    // Enter confirms the dialog (the Clips hotkeys yield to it instead of opening the monitor)
-    await page.keyboard.press('Delete');
-    await expect(page.locator('.modal .btn-danger', { hasText: 'Remove' })).toBeFocused();
-    await page.keyboard.press('Enter');
+    await expect(page.locator('.modal')).toHaveCount(0);
     await expect(page.locator('.bin-grid .bin-card')).toHaveCount(1);
+    await expect(page.locator('.toast').last()).toContainText('Deleted 2 items and 2 timeline clips');
     await expect(page.locator('.src-monitor')).toHaveCount(0);
     let p = await getProject(page);
     expect(Object.keys(p.media)).toEqual([blue]);
@@ -557,14 +549,36 @@ test('remove from bin asks for confirmation, takes timeline clips along, and und
     await card(page, red).dblclick();
     await page.waitForFunction(() => document.querySelector('.src-monitor .src-video')?.readyState >= 1);
 
-    // context-menu removal of one item + toast undo
+    // the source monitor's Delete button deletes the clip on screen and shows the next one
+    const shown = (await ui(page)).sourceMediaId;
+    await page.locator('[data-testid="src-delete"]').click();
+    await expect(page.locator('.bin-grid .bin-card')).toHaveCount(2);
+    await expect.poll(async () => (await ui(page)).sourceMediaId).not.toBe(shown);
+    expect((await ui(page)).sourceMediaId).toBeTruthy();
+    await page.locator('.toast .toast-action', { hasText: 'Undo' }).last().click();
+    await expect(page.locator('.bin-grid .bin-card')).toHaveCount(3);
+
+    // the card's hover trash button + toast undo
     await page.keyboard.press('Escape');
-    await card(page, blue).click({ button: 'right' });
-    await page.locator('.menu-item', { hasText: 'Remove from bin' }).click();
-    await page.locator('.modal .btn-danger').click();
+    await card(page, blue).hover();
+    await card(page, blue).locator('.bin-card-delete').click();
     await expect(page.locator('.bin-grid .bin-card')).toHaveCount(2);
     await page.locator('.toast .toast-action', { hasText: 'Undo' }).last().click();
     await expect(page.locator('.bin-grid .bin-card')).toHaveCount(3);
+
+    // context-menu delete
+    await card(page, blue).click({ button: 'right' });
+    await page.locator('.menu-item', { hasText: 'Delete from bin' }).click();
+    await expect(page.locator('.bin-grid .bin-card')).toHaveCount(2);
+    await page.locator('.toast .toast-action', { hasText: 'Undo' }).last().click();
+    await expect(page.locator('.bin-grid .bin-card')).toHaveCount(3);
+
+    // clean-up menu: delete rejected
+    await page.evaluate((id) => window.__gis.projectStore.update((p) => window.__gis.model.updateMedia(p, id, { flag: 'reject' }), { label: 'flag' }), blue);
+    await page.locator('[data-testid="bin-cleanup"]').click();
+    await page.locator('.menu-item', { hasText: 'Delete rejected (1)' }).click();
+    await expect(page.locator('.bin-grid .bin-card')).toHaveCount(2);
+    expect(Object.keys((await getProject(page)).media)).not.toContain(blue);
     expect(appErrors(ctx)).toEqual([]);
   } finally {
     await ctx.close();

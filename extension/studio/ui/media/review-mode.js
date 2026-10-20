@@ -17,12 +17,13 @@ import { StageStatus, FlagControls } from './source-monitor.js';
 import { memo } from './memo.js';
 import { usePref } from './prefs.js';
 import { guardKeys, revealIn } from './keys.js';
-import { setMarks, flagMedia, rateMedia, addToTimeline } from './actions.js';
+import { setMarks, flagMedia, rateMedia, addToTimeline, removeFromBin } from './actions.js';
 
 const STAMPS = {
   pick: { text: 'Picked', icon: 'flag', cls: 'is-pick' },
   reject: { text: 'Rejected', icon: 'x', cls: 'is-reject' },
   unflag: { text: 'Unflagged', icon: 'minus', cls: 'is-neutral' },
+  deleted: { text: 'Deleted', icon: 'trash', cls: 'is-reject' },
   added: { text: 'Added to timeline', icon: 'check', cls: 'is-added' },
 };
 
@@ -35,6 +36,7 @@ const KEY_HINTS = [
   ['1', '5', 'rate'],
   ['I', 'O', 'in / out'],
   ['↵', null, 'add & next'],
+  ['Del', null, 'delete'],
   ['Esc', null, 'exit'],
 ];
 
@@ -134,6 +136,14 @@ export function ReviewMode({ active, ids, startIndex = 0, onExit }) {
     showStamp('added');
     next();
   };
+  // Delete the item on screen and go to the next one (the walk skips items that no longer exist).
+  const deleteAndNext = async () => {
+    if (!m) return;
+    const nextPos = walkStep(list, at, 1, (x) => x !== m.id && alive(x));
+    if (!(await removeFromBin([m.id]))) return;
+    showStamp('deleted');
+    goPos(nextPos);
+  };
   const startOver = () => {
     visited.current = new Set();
     goPos(resolveWalk(list, 0, alive));
@@ -152,6 +162,8 @@ export function ReviewMode({ active, ids, startIndex = 0, onExit }) {
     o: markOut,
     'mod+shift+x': () => m && setMarks(m.id, EMPTY_MARKS, { label: 'Clear IN/OUT' }),
     enter: () => (done ? exit() : addAndNext()),
+    delete: deleteAndNext,
+    backspace: deleteAndNext,
     escape: exit,
     j: () => timed && player.shuttle('j'),
     k: () => timed && player.shuttle('k'),
@@ -273,7 +285,7 @@ export function ReviewMode({ active, ids, startIndex = 0, onExit }) {
           <aside class="clips-review-side">
             <div class="clips-review-name" title=${m.name || displayTitle(m)}>${m.name || displayTitle(m)}</div>
             <div class="clips-review-meta">${[m.kind, m.duration ? formatDuration(m.duration) : null, m.width ? `${m.width}×${m.height}` : null].filter(Boolean).join(' · ')}</div>
-            <${FlagControls} media=${m} size="lg" />
+            <${FlagControls} media=${m} size="lg" onDelete=${deleteAndNext} />
             ${timed &&
             html`<div class="clips-review-marks">
               <span class=${cx('clips-review-mark', marks.in != null && 'is-set')}>IN ${formatTime(marks.in ?? 0)}</span>

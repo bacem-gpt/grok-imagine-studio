@@ -89,6 +89,8 @@ Project shape:
   markers: [{id, time, label, color}],
   shots: [Shot…],                                           // Prompts tab (shape below)
   bible: { characters: [], locations: [], style: '', notes: '' },
+  dialogue: null | { parts: [{id, text, shotId}], scene, speakers: {[key]: {name, voice, mention}},
+                     settings: {clipSeconds, wps, format, continuity, phrases} },   // Dialogue tab (prompts/dialogue.js)
   exportSettings: null | {...} }
 MediaItem { id, kind:'video'|'image'|'audio', name, origin:'grok'|'file'|'url'|'frame'|'export', sourceUrl, altUrls,
             pageUrl, pageKey, postId, prompt, mime, size, duration, width, height, hasAudio, fps,
@@ -96,8 +98,14 @@ MediaItem { id, kind:'video'|'image'|'audio', name, origin:'grok'|'file'|'url'|'
 VideoClip { id, mediaId, in, out, speed, volume, muted, fit:'cover'|'contain'|'fill', filters|null, fadeIn, fadeOut,
             transition: {type, duration}|null  /* INTO this clip */, kenBurns|null, label }
 AudioClip { id, mediaId, start, in, out, volume, fadeIn, fadeOut, lane, label }      // mediaId may be a video (use its sound)
-TextClip  { id, text, start, duration, style: TEXT_STYLE_DEFAULTS, animation, lane }
+TextClip  { id, text, start, duration, style: TEXT_STYLE_DEFAULTS, animation, lane, dialogue? /* subtitle added by the Dialogue tab */ }
+OverlayClip { id, mediaId, start, in, out, speed, volume, muted, fadeIn, fadeOut, lane, label,     // tracks.overlay (V2…)
+            mode: 'pip'|'cutaway'|'split'|'greenscreen', pip, split, key, filters, fit, transitionIn, transitionOut }
 ```
+Global library additions (libraryStore, merged by id across windows): `phrases: [{id, text, category, auto}]` and
+`phraseSets: [{id, name, texts}]` — the Quick phrases of the Prompts tab (pure logic in `prompts/phrases.js`).
+A dialogue part links to its shot by `part.shotId`; the takes of that shot are the part's videos
+(`partForMedia()`), which the bin badges as P1, P2… The Dialogue tab is `ui/dialogue/**` + `styles/dialogue.css`.
 Main track is magnetic (no gaps); a transition overlaps the two clips. Key functions: `layoutProject`,
 `layoutVideo`, `videoItemsAt`, `sourceTimeAt`, `timelineTimeOf`, `fadeFactor`, `transitionProgress`,
 `insertionIndexAt`, `snapPoints`, `snapTime`, `findClip`, `addMedia`, `updateMedia`, `removeMedia`,

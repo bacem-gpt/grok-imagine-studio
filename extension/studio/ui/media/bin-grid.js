@@ -36,6 +36,7 @@ import {
   rateMedia,
   downloadMedia,
   removeFromBin,
+  cleanupCandidates,
   importFilesFlow,
   importUrlFlow,
   mediaMenuItems,
@@ -212,6 +213,7 @@ const BinCard = memo(function BinCard({ id, api, selected, current, tabbable, fl
         <${IconButton} icon="plus" size="sm" kind="solid" tabindex="-1" title="Add to timeline (E)" onClick=${cardAction(() => addToTimeline([id]))} />
         <${IconButton} icon="maximize" size="sm" kind="solid" tabindex="-1" title="Open in source monitor (Enter)" onClick=${cardAction(() => api.onOpen(id))} />
         <${IconButton} icon="more" size="sm" kind="solid" tabindex="-1" title="More actions" onClick=${cardAction((e) => api.onContext(e, id, scrub.current))} />
+        <${IconButton} icon="trash" size="sm" kind="solid" class="bin-card-delete" tabindex="-1" title="Delete (Del) — undo with Ctrl+Z" onClick=${cardAction(() => removeFromBin([id]))} />
       </div>
     </div>
     <div class="bin-card-body">
@@ -239,6 +241,17 @@ function BinToolbar({ narrow, cardSize, onCardSize, onReview, reviewCount, onSho
   const searchRef = useRef(null);
   const [filtersOpen, setFiltersOpen] = usePref('filtersOpen', false);
   const activeFilters = (filter.kind !== 'all') + (filter.flag !== 'all') + (filter.minRating > 0);
+  const cleanupMenu = (e) => {
+    const c = cleanupCandidates();
+    showMenu(e.currentTarget, [
+      { header: 'Clean up the bin' },
+      { label: `Delete rejected (${c.rejected.length})`, icon: 'x', danger: true, disabled: !c.rejected.length, onClick: () => removeFromBin(c.rejected) },
+      { label: `Delete items not on the timeline (${c.unused.length})`, icon: 'film', danger: true, disabled: !c.unused.length, onClick: () => removeFromBin(c.unused, { confirm: c.unused.length > 3 }) },
+      { label: `Delete failed downloads (${c.failed.length})`, icon: 'alert', danger: true, disabled: !c.failed.length, onClick: () => removeFromBin(c.failed) },
+      '-',
+      { label: 'Tip: hover a clip and click its trash icon, or press Del', disabled: true },
+    ]);
+  };
   const filters = html`
     <${Select} class="bin-select" value=${filter.kind} options=${KIND_OPTIONS} title="Kind" onChange=${(v) => setBinFilter({ kind: v })} />
     <${Select} class="bin-select" value=${filter.flag} options=${FLAG_OPTIONS} title="Flags" onChange=${(v) => setBinFilter({ flag: v })} />
@@ -296,6 +309,7 @@ function BinToolbar({ narrow, cardSize, onCardSize, onReview, reviewCount, onSho
             ])}
           >${narrow ? '' : 'Import'}<//
         >
+        <${IconButton} icon="trash" size="sm" title="Clean up the bin: delete rejected, unused or failed items" onClick=${cleanupMenu} data-testid="bin-cleanup" />
         <${IconButton} icon="keyboard" size="sm" title="Keyboard shortcuts (?)" onClick=${onShowKeys} />
         <${Button} size="sm" kind="primary" icon="play2" disabled=${!reviewCount} onClick=${() => onReview()} title="Review the filtered bin one clip at a time with the keyboard, from the first item (R)">Review<//>
       </div>
@@ -329,7 +343,7 @@ function SelectionBar({ ids, orderedIds, narrow, onOpen }) {
     <${IconButton} icon="minus" size="sm" title="Unflag (U)" onClick=${() => flagMedia(ids, null)} />
     <${IconButton} icon="star" size="sm" title="Rate (1–5)" onClick=${rateMenu} />
     <${IconButton} icon="download" size="sm" title="Download originals" onClick=${() => downloadMedia(ordered)} />
-    <${IconButton} icon="trash" size="sm" kind="danger" title="Remove from bin (Del)" onClick=${() => removeFromBin(ordered)} />
+    <${IconButton} icon="trash" size="sm" kind="danger" title="Delete from bin (Del) — undo with Ctrl+Z" onClick=${() => removeFromBin(ordered)} />
     <span class="spacer"></span>
     <${Button} size="sm" kind="ghost" onClick=${() => uiStore.set((s) => ({ ...s, binSelection: [] }))} title="Clear selection (Esc)">Clear<//>
   </div>`;

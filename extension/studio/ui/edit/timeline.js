@@ -1,5 +1,5 @@
-// Timeline: toolbar, adaptive ruler with markers and playhead, text lanes, the magnetic main track V1 and audio
-// lanes A1..An. Interactions: click/shift/ctrl selection, drag V1 clips to reorder (insertion indicator), drag
+// Timeline: toolbar, adaptive ruler with markers and playhead, text lanes, overlay lanes V2..Vn (picture in picture,
+// cutaway, side by side, green screen; free-positioned like audio), the magnetic main track V1 and audio lanes A1..An. Interactions: click/shift/ctrl selection, drag V1 clips to reorder (insertion indicator), drag
 // audio/text clips in time and across lanes (snapping), ripple trims on every edge with live monitor preview,
 // fade handles, transition badges at each cut, drops from the bin (application/x-gis-media) and from the OS,
 // context menus, ctrl+wheel zoom, wheel scroll and auto-scroll while playing. Every edit is one undo step
@@ -19,6 +19,7 @@ import {
   stepZoom,
   rulerTicks,
   laneCounts,
+  overlayLaneCount,
   trackGeometry,
   rowAt,
   laneAt,
@@ -33,8 +34,9 @@ import {
 } from './timeline-math.js';
 import * as Ops from './edit-ops.js';
 import * as A from './actions.js';
-import { VideoClipView, AudioClipView, TextClipView, TransitionBadge } from './timeline-clips.js';
+import { VideoClipView, AudioClipView, TextClipView, TransitionBadge, OverlayClipView } from './timeline-clips.js';
 import { TransitionPopover } from './transition-popover.js';
+import { titleMenuItems, backgroundMenuItems } from './inspector-tools.js';
 
 const RULER_H = 26;
 /** Below this timeline width the track headers shrink (the toolbar decides its labels by its own width). */
@@ -133,6 +135,7 @@ function Overlays({ store, zoom, header, geo }) {
   const vRow = geo.rows.find((r) => r.kind === 'video');
   const x = (t) => header + t * zoom;
   const audioRow = o.dropLane != null ? geo.rows.find((r) => r.kind === 'audio' && r.lane === o.dropLane) : null;
+  const ovRow = o.dropOverlayLane != null ? geo.rows.find((r) => r.kind === 'overlay' && r.lane === o.dropOverlayLane) : null;
   return html`
     ${o.ghost &&
     html`<div class="tl-ghost" style=${`left:${header + o.ghost.x}px;width:${o.ghost.w}px;top:${vRow.top + 5}px;height:${vRow.height - 10}px`}>
@@ -142,14 +145,25 @@ function Overlays({ store, zoom, header, geo }) {
     ${o.dropAudioAt != null &&
     audioRow &&
     html`<div class="tl-insert tl-insert-audio" style=${`left:${x(o.dropAudioAt) - 1}px;top:${audioRow.top + 2}px;height:${audioRow.height - 4}px`}></div>`}
+    ${o.dropOverlayAt != null &&
+    ovRow &&
+    html`<div class="tl-insert tl-insert-overlay" style=${`left:${x(o.dropOverlayAt) - 1}px;top:${ovRow.top + 2}px;height:${ovRow.height - 4}px`}></div>`}
     ${o.snap != null && html`<div class="tl-snapline" style=${`left:${x(o.snap)}px`}></div>`}
     ${o.hint && html`<div class="tl-hint" style=${`left:${o.hint.x}px;top:${o.hint.y}px`}>${o.hint.text}</div>`}
   `;
 }
 
 function rowIcon(kind) {
-  return kind === 'text' ? 'type' : kind === 'video' ? 'film' : 'music';
+  return kind === 'text' ? 'type' : kind === 'video' ? 'film' : kind === 'overlay' ? 'pip' : 'music';
 }
+
+const OVERLAY_MENU_ICONS = { pip: 'pip', cutaway: 'film', split: 'split-v', greenscreen: 'layers' };
+const ROW_TITLES = {
+  video: 'Main track — clips play back to back',
+  text: 'Titles & captions',
+  overlay: 'Overlays — picture in picture, cutaway, side by side, green screen (drop clips here)',
+  audio: 'Music, voice & sound',
+};
 
 /**
  * @param {Object} props
@@ -191,12 +205,16 @@ export function Timeline({ session, active, narrow }) {
   // labels and zoom slider by the toolbar's own width (= the timeline's), not by the Edit view's layout
   const tb = toolbarLayout(bodySize.width || (narrow ? 480 : 1000));
   const HEADER = tight ? 46 : 74;
-  const dims = narrow ? { textH: 26, videoH: 56, audioH: 40 } : { textH: 30, videoH: 66, audioH: 46 };
+  const dims = narrow ? { textH: 26, videoH: 56, audioH: 40, overlayH: 40 } : { textH: 30, videoH: 66, audioH: 46, overlayH: 48 };
   const lay = useMemo(() => M.layoutProject({ tracks }), [tracks]);
-  const counts = laneCounts({ tracks });
+  const movingOverlay = mode?.type === 'move' && mode.track === 'overlay';
+  // While an overlay clip is dragged the overlay lanes stay as they were at the start plus one new lane on top: the
+  // rows above V1 must not grow under the pointer (each new top lane would push the others down mid-drag).
+  const counts = { ...laneCounts({ tracks }), overlay: movingOverlay ? mode.lanes : overlayLaneCount({ tracks }) };
   const extraAudio = (mode?.type === 'move' && mode.track === 'audio') || (mode?.type === 'drop' && mode.audio) ? 1 : 0;
-  const geo = useMemo(() => trackGeometry(counts, { ...dims, extraAudio }), [counts.text, counts.audio, narrow, extraAudio]);
-  const empty = !tracks.video.length && !tracks.audio.length && !tracks.text.length;
+  const extraOverlay = movingOverlay ? 1 : 0;
+  const geo = useMemo(() => trackGeometry(counts, { ...dims, extraAudio, extraOverlay }), [counts.text, counts.audio, counts.overlay, narrow, extraAudio, extraOverlay]);
+  const empty = !tracks.video.length && !tracks.audio.length && !tracks.text.length && !(tracks.overlay || []).length;
 
   const viewW = bodySize.width;
   const lanesW = Math.max(0, viewW - HEADER);
@@ -322,7 +340,7 @@ export function Timeline({ session, active, narrow }) {
       session.on('reveal', ({ clipId }) => {
         requestAnimationFrame(() => {
           const L = live.current;
-          const it = [...L.lay.video, ...L.lay.audio, ...L.lay.text].find((x) => x.clip.id === clipId);
+          const it = [...L.lay.video, ...L.lay.audio, ...L.lay.text, ...L.lay.overlay].find((x) => x.clip.id === clipId);
           const sc = scrollRef.current;
           if (!it || !sc) return;
           const w = sc.clientWidth - L.HEADER;
@@ -444,11 +462,13 @@ export function Timeline({ session, active, narrow }) {
           sel = additive ? [...sel, clip.id] : [clip.id];
           A.setSelection(sel);
         }
-        const moving = L.tracks[track].filter((c) => sel.includes(c.id)).map((c) => ({ id: c.id, start: c.start, lane: Math.floor(c.lane || 0) }));
-        const dur = track === 'audio' ? M.audioClipDuration(clip) : clip.duration;
+        const moving = (L.tracks[track] || []).filter((c) => sel.includes(c.id)).map((c) => ({ id: c.id, start: c.start, lane: Math.floor(c.lane || 0) }));
+        const dur = track === 'audio' ? M.audioClipDuration(clip) : track === 'overlay' ? M.clipDuration(clip) : clip.duration;
         dragRef.current = true;
-        setMode({ type: 'move', track });
+        const lanes = track === 'overlay' ? overlayLaneCount({ tracks: L.tracks }) : null;
+        setMode({ type: 'move', track, lanes });
         return {
+          maxLane: track === 'overlay' ? lanes : 15,
           moving,
           dur,
           origStart: clip.start,
@@ -459,7 +479,7 @@ export function Timeline({ session, active, narrow }) {
           minLane: Math.min(...moving.map((m) => m.lane)),
         };
       },
-      onMove: ({ dx, ev, ctx }) => {
+      onMove: ({ dx, dy, ev, ctx }) => {
         edgeScroll(ev.clientX);
         const L = live.current;
         // pointer travel in timeline pixels: screen travel plus whatever edge auto-scroll moved the view meanwhile
@@ -473,7 +493,12 @@ export function Timeline({ session, active, narrow }) {
             snap = s.point;
           }
         }
-        const lane = laneAt(L.geo, track, yInTracks(ev.clientY));
+        // Overlay lanes go by vertical travel (a lane per row height): the extra lane shown on top during the drag
+        // shifts the rows under the pointer, so the row under it can't tell the lane.
+        const lane =
+          track === 'overlay'
+            ? clamp(ctx.grabLane + Math.round(-dy / (L.geo.rows.find((r) => r.kind === 'overlay')?.height || 44)), 0, ctx.maxLane)
+            : laneAt(L.geo, track, yInTracks(ev.clientY));
         const laneDelta = Math.max(lane - ctx.grabLane, -ctx.minLane);
         projectStore.update(
           (p) => {
@@ -481,11 +506,11 @@ export function Timeline({ session, active, narrow }) {
             for (const m of ctx.moving) {
               const start = Math.max(0, m.start + delta);
               const ln = clamp(m.lane + laneDelta, 0, 15);
-              q = track === 'audio' ? M.moveAudioClip(q, m.id, start, ln) : M.updateClip(q, m.id, { start, lane: ln });
+              q = track === 'audio' ? M.moveAudioClip(q, m.id, start, ln) : track === 'overlay' ? M.moveOverlayClip(q, m.id, start, ln) : M.updateClip(q, m.id, { start, lane: ln });
             }
             return q;
           },
-          { label: track === 'audio' ? 'Move audio' : 'Move text', merge: ctx.merge },
+          { label: track === 'audio' ? 'Move audio' : track === 'overlay' ? 'Move overlay' : 'Move text', merge: ctx.merge },
         );
         overlay.set(() => ({ snap, hint: { x: ev.clientX, y: ev.clientY, text: formatTime(ctx.origStart + delta) } }));
       },
@@ -552,11 +577,11 @@ export function Timeline({ session, active, narrow }) {
           const r = snapAt((edge === 'out' ? ctx.item.end : ctx.item.start) + dx / z);
           snap = r.snap;
           // out: T is the new end -> new out point; in: T is the new (drawn) left edge -> new in point. Same formula.
-          const src = c.in + (r.T - ctx.item.start) * speed;
-          projectStore.update((p) => M.trimVideoClip(p, clip.id, edge, src), { label: 'Trim clip', merge: ctx.merge });
+          // (M.trimPatchAt maps the edge to the right source point — a reversed clip's left edge is its out-point)
+          projectStore.update((p) => M.updateClip(p, clip.id, M.trimPatchAt(ctx.item, edge, r.T)), { label: 'Trim clip', merge: ctx.merge });
           const it2 = M.layoutVideo(projectStore.get().tracks.video).find((it) => it.clip.id === clip.id);
           if (it2) {
-            const shift = edge === 'in' ? ((it2.clip.in - c.in) / speed) * z : 0;
+            const shift = edge === 'in' ? (ctx.item.duration - it2.duration) * z : 0;
             session.seek(edge === 'in' ? it2.start : Math.max(it2.start, it2.end - 1 / (L.fps || 30)));
             text = `${edge === 'in' ? `In ${formatTime(it2.clip.in)}` : `Out ${formatTime(it2.clip.out)}`} · ${formatDuration(it2.duration)}`;
             if (edge === 'in') setMode({ type: 'trim', clipId: clip.id, rippleFrom: it2.index, shift });
@@ -573,6 +598,17 @@ export function Timeline({ session, active, narrow }) {
           projectStore.update((p) => M.trimAudioClip(p, clip.id, edge, T), { label: 'Trim audio', merge: ctx.merge });
           const nc = M.findClip(projectStore.get(), clip.id)?.clip;
           if (nc) text = `${edge === 'in' ? 'Start' : 'End'} ${formatTime(edge === 'in' ? nc.start : nc.start + M.audioClipDuration(nc))} · ${formatDuration(M.audioClipDuration(nc))}`;
+        } else if (track === 'overlay') {
+          const r = snapAt((edge === 'in' ? c.start : c.start + M.clipDuration(c)) + dx / z);
+          snap = r.snap;
+          projectStore.update((p) => M.trimOverlayClip(p, clip.id, edge, r.T), { label: 'Trim overlay', merge: ctx.merge });
+          const nc = M.findClip(projectStore.get(), clip.id)?.clip;
+          if (nc) {
+            const end = nc.start + M.clipDuration(nc);
+            // Show the frame at the edge being dragged (like main-track trims); the playhead returns on release.
+            session.seek(edge === 'in' ? nc.start : Math.max(nc.start, end - 1 / (L.fps || 30)));
+            text = `${edge === 'in' ? 'Start' : 'End'} ${formatTime(edge === 'in' ? nc.start : end)} · ${formatDuration(M.clipDuration(nc))}`;
+          }
         } else {
           const r = snapAt((edge === 'in' ? c.start : c.start + c.duration) + dx / z);
           snap = r.snap;
@@ -590,7 +626,7 @@ export function Timeline({ session, active, narrow }) {
           setTimeout(() => setSettling(false), 240);
         }
         setMode(null);
-        if (track === 'video' && ctx) session.seek(Math.min(ctx.held, session.duration()));
+        if ((track === 'video' || track === 'overlay') && ctx) session.seek(Math.min(ctx.held, session.duration()));
       },
     });
   };
@@ -602,7 +638,7 @@ export function Timeline({ session, active, narrow }) {
       threshold: 1,
       onStart: () => {
         dragRef.current = true;
-        return { orig: clip[which] || 0, dur: track === 'video' ? M.clipDuration(clip) : M.audioClipDuration(clip), merge: `fade:${clip.id}:${which}:${Date.now()}` };
+        return { orig: clip[which] || 0, dur: track === 'video' || track === 'overlay' ? M.clipDuration(clip) : M.audioClipDuration(clip), merge: `fade:${clip.id}:${which}:${Date.now()}` };
       },
       onMove: ({ dx, ev, ctx }) => {
         const z = live.current.zoom;
@@ -659,7 +695,7 @@ export function Timeline({ session, active, narrow }) {
     const L = live.current;
     const t = session.time();
     const items = [];
-    const it = [...L.lay.video, ...L.lay.audio, ...L.lay.text].find((x) => x.clip.id === clip.id);
+    const it = [...L.lay.video, ...L.lay.audio, ...L.lay.text, ...L.lay.overlay].find((x) => x.clip.id === clip.id);
     const inside = !!it && t > it.start + 0.05 && t < it.end - 0.05;
     items.push({ label: 'Split at playhead', icon: 'scissors', shortcut: 's', disabled: !inside, onClick: () => A.splitAtPlayhead(session) });
     items.push({ label: 'Trim start to playhead', icon: 'mark-in', shortcut: 'q', disabled: !inside, onClick: () => A.trimToPlayhead(session, 'in') });
@@ -676,6 +712,7 @@ export function Timeline({ session, active, narrow }) {
       });
       if (clip.transition) items.push({ label: 'Remove transition', icon: 'x', onClick: () => projectStore.update((q) => M.setTransition(q, clip.id, null), { label: 'Remove transition' }) });
       items.push({ label: 'Detach audio', icon: 'music', disabled: !Ops.canDetachAudio(p, clip), onClick: () => A.detachAudio(clip.id) });
+      items.push({ label: 'Move to overlay track', icon: 'pip', onClick: () => A.moveToOverlay(clip.id) });
       if (m?.kind === 'video') {
         items.push({
           label: clip.muted ? 'Unmute clip' : 'Mute clip',
@@ -683,6 +720,17 @@ export function Timeline({ session, active, narrow }) {
           onClick: () => projectStore.update((q) => M.updateClip(q, clip.id, { muted: !clip.muted }), { label: clip.muted ? 'Unmute clip' : 'Mute clip' }),
         });
       }
+      // iMovie clip tools
+      items.push('-');
+      if (m?.kind === 'video' && !clip.freeze) {
+        items.push({ label: 'Reverse', icon: 'rewind', checked: !!clip.reverse, onClick: () => A.toggleReverse(clip.id) });
+        items.push({ label: 'Add freeze frame', icon: 'snowflake', shortcut: 'shift+f', disabled: !inside, onClick: () => A.freezeFrame(session) });
+        items.push({ label: 'Instant replay (50%)', icon: 'repeat', onClick: () => A.instantReplay(session) });
+      }
+      items.push({ label: 'Rotate left', icon: 'rotate-ccw', onClick: () => A.rotateClip(clip.id, -1) });
+      items.push({ label: 'Rotate right', icon: 'rotate', onClick: () => A.rotateClip(clip.id, 1) });
+      items.push({ label: 'Flip horizontally', icon: 'flip', checked: !!clip.flipH, onClick: () => A.flipClip(clip.id, 'h') });
+      items.push({ label: 'Auto enhance', icon: 'wand', onClick: () => A.autoEnhance(clip.id) });
       items.push('-');
       items.push({
         label: 'Grab frame to bin',
@@ -694,6 +742,23 @@ export function Timeline({ session, active, narrow }) {
       });
       items.push({ label: 'Reveal in bin', icon: 'search', onClick: () => A.revealInBin(clip.mediaId, session) });
       items.push({ label: 'Open in source monitor', icon: 'eye', onClick: () => A.openInSource(clip.mediaId) });
+    } else if (track === 'overlay') {
+      const m = p.media[clip.mediaId];
+      items.push({ header: 'Overlay' });
+      for (const mo of M.OVERLAY_MODES) {
+        items.push({ label: mo.name, icon: clip.mode === mo.id ? 'check' : OVERLAY_MENU_ICONS[mo.id], onClick: () => A.setOverlayMode([clip.id], mo.id) });
+      }
+      items.push('-');
+      if (m?.kind === 'video') {
+        items.push({
+          label: clip.muted ? 'Unmute clip' : 'Mute clip',
+          icon: clip.muted ? 'volume' : 'volume-x',
+          onClick: () => projectStore.update((q) => M.updateClip(q, clip.id, { muted: !clip.muted }), { label: clip.muted ? 'Unmute clip' : 'Mute clip' }),
+        });
+      }
+      items.push({ label: 'Move to main track', icon: 'film', onClick: () => A.moveToMain(clip.id) });
+      items.push({ label: 'Edit overlay…', icon: 'sliders', onClick: () => (A.setSelection([clip.id]), openInspector()) });
+      items.push({ label: 'Reveal in bin', icon: 'search', onClick: () => A.revealInBin(clip.mediaId, session) });
     } else if (track === 'audio') {
       items.push({ label: 'Fit audio to video end', icon: 'arrow-right', onClick: () => A.fitAudioToVideoEnd() });
       items.push({ label: 'Reveal in bin', icon: 'search', onClick: () => A.revealInBin(clip.mediaId, session) });
@@ -726,6 +791,14 @@ export function Timeline({ session, active, narrow }) {
       { label: 'Add text here', icon: 'type', onClick: () => A.addTextAt(session, t) },
       { label: 'Add marker here', icon: 'marker', onClick: () => A.addMarkerAt(t) },
     ];
+    if (row?.kind === 'overlay') {
+      const p = projectStore.get();
+      const bin = p.mediaOrder.map((id) => p.media[id]).filter((m) => m && m.kind !== 'audio' && m.status !== 'error');
+      if (bin.length) {
+        items.push('-', { header: 'Add an overlay here' });
+        for (const m of bin.slice(0, 8)) items.push({ label: m.name, icon: m.kind === 'image' ? 'image' : 'film', onClick: () => A.placeAsOverlay([m.id], t, { lane: row.lane }) });
+      }
+    }
     if (row?.kind === 'audio') {
       items.push('-', { label: 'Add audio file…', icon: 'upload', onClick: () => (session.seek(t), A.addAudioFromFiles(session)) });
       items.push({ label: 'Add audio from a link…', icon: 'link', onClick: () => (session.seek(t), A.addAudioFromUrl(session)) });
@@ -810,6 +883,25 @@ export function Timeline({ session, active, narrow }) {
     ]);
   };
 
+  /** "+" on the overlay row: add a bin video/still (or a file) as picture in picture at the playhead. */
+  const overlayMenu = (e, lane = 0) => {
+    e.stopPropagation();
+    const p = projectStore.get();
+    const bin = p.mediaOrder.map((id) => p.media[id]).filter((m) => m && m.kind !== 'audio' && m.status !== 'error');
+    showMenu(e, [
+      { header: 'Add an overlay at the playhead' },
+      {
+        label: 'From a file…',
+        icon: 'upload',
+        onClick: async () => {
+          const files = await pickFiles({ accept: 'video/*,image/*', multiple: true });
+          if (files.length) A.importAndPlace(files, { audioTime: session.time(), overlayLane: lane });
+        },
+      },
+      ...(bin.length ? ['-', { header: 'From the bin' }, ...bin.slice(0, 10).map((m) => ({ label: m.name, icon: m.kind === 'image' ? 'image' : 'film', onClick: () => A.placeAsOverlay([m.id], session.time(), { lane }) }))] : []),
+    ]);
+  };
+
   // ------------------------------------------------------------------ drag & drop from the bin / OS
 
   const dropTarget = (e) => {
@@ -817,6 +909,7 @@ export function Timeline({ session, active, narrow }) {
     const t = timeAtClientX(e.clientX);
     const row = rowAt(L.geo, yInTracks(e.clientY));
     const audio = row?.kind === 'audio';
+    const overlayRow = row?.kind === 'overlay';
     let at = t;
     if (L.snapping) {
       const s = M.snapTime(t, snapCandidates(projectStore.get(), [], [session.time()]), SNAP_PX / L.zoom);
@@ -824,7 +917,7 @@ export function Timeline({ session, active, narrow }) {
     }
     const index = M.insertionIndexAt(L.lay.video, t);
     const boundary = index < L.lay.video.length ? L.lay.video[index].start : L.lay.videoEnd;
-    return { t, at, row, audio, boundary };
+    return { t, at, row, audio, overlay: overlayRow, boundary };
   };
   const acceptsDrag = (e) => {
     const types = [...(e.dataTransfer?.types || [])];
@@ -836,9 +929,17 @@ export function Timeline({ session, active, narrow }) {
     e.dataTransfer.dropEffect = 'copy';
     const d = dropTarget(e);
     if (mode?.type !== 'drop' || mode.audio !== d.audio) setMode({ type: 'drop', audio: d.audio });
-    const next = d.audio ? { dropAudioAt: d.at, dropLane: d.row.lane } : { insertAt: d.boundary };
+    const next = d.audio ? { dropAudioAt: d.at, dropLane: d.row.lane } : d.overlay ? { dropOverlayAt: d.at, dropOverlayLane: d.row.lane } : { insertAt: d.boundary };
     const cur = overlay.get();
-    if (!cur || cur.insertAt !== next.insertAt || cur.dropAudioAt !== next.dropAudioAt || cur.dropLane !== next.dropLane) overlay.set(() => next);
+    if (
+      !cur ||
+      cur.insertAt !== next.insertAt ||
+      cur.dropAudioAt !== next.dropAudioAt ||
+      cur.dropLane !== next.dropLane ||
+      cur.dropOverlayAt !== next.dropOverlayAt ||
+      cur.dropOverlayLane !== next.dropOverlayLane
+    )
+      overlay.set(() => next);
   };
   const clearDrop = () => {
     overlay.set(() => null);
@@ -852,7 +953,7 @@ export function Timeline({ session, active, narrow }) {
     e.preventDefault();
     const d = dropTarget(e);
     clearDrop();
-    const opts = { time: d.t, audioTime: d.at, audioLane: d.audio ? d.row.lane : null };
+    const opts = { time: d.t, audioTime: d.at, audioLane: d.audio ? d.row.lane : null, overlayLane: d.overlay ? d.row.lane : null };
     const raw = e.dataTransfer.getData(A.MEDIA_DRAG_TYPE);
     if (raw) {
       let ids = [];
@@ -878,6 +979,7 @@ export function Timeline({ session, active, narrow }) {
   const pad = 3;
   const textTop = (lane) => geo.laneTop('text', lane) + 3;
   const audioTop = (lane) => geo.laneTop('audio', lane) + 3;
+  const overlayTop = (lane) => geo.laneTop('overlay', lane) + 3;
   const addable = empty ? A.clipsToAdd() : null;
   const binCount = useProject((p) => p.mediaOrder.length);
 
@@ -888,6 +990,11 @@ export function Timeline({ session, active, narrow }) {
       <${IconButton} icon="copy" size="sm" title="Duplicate selected (Ctrl+D)" disabled=${!selection.length} onClick=${() => A.duplicateSelection()} />
       <span class="tl-sep"></span>
       <${Button} size="sm" kind="ghost" icon="type" class="tl-tool-btn" title="Add a title at the playhead (T)" onClick=${() => A.addTextAt(session, session.time())}>${tb.text && 'Text'}<//>
+      <${IconButton} icon="sparkles" size="sm" class="tl-styles-btn" title="Title styles & backgrounds" onClick=${(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        const at = { x: r.left, y: r.bottom + 4 };
+        showMenu(at, [{ header: 'Add a title' }, ...titleMenuItems(session), '-', { label: 'Add a background…', icon: 'image', onClick: () => showMenu(at, [{ header: 'Background at the playhead' }, ...backgroundMenuItems(session)]) }]);
+      }} />
       <${Button} size="sm" kind="ghost" icon="music" class="tl-tool-btn" title="Add music or sound (file, link or bin)" onClick=${audioMenu}>${tb.audio && 'Audio'}<//>
       <${IconButton} icon="marker" size="sm" title="Add a marker at the playhead (M)" onClick=${() => A.addMarkerAt(session.time())} />
       <${Button}
@@ -972,9 +1079,14 @@ export function Timeline({ session, active, narrow }) {
               onPointerDown=${onRowDown}
               onContextMenu=${(e) => rowMenu(e, r)}
             >
-              <div class="tl-row-head" style=${`width:${HEADER}px`} title=${r.kind === 'video' ? 'Main track — clips play back to back' : r.kind === 'text' ? 'Titles & captions' : 'Music, voice & sound'}>
+              <div class="tl-row-head" style=${`width:${HEADER}px`} title=${ROW_TITLES[r.kind] || ''}>
                 <${Icon} name=${rowIcon(r.kind)} size=${tight ? 12 : 13} />
                 <span>${r.extra ? 'New' : r.label}</span>
+                ${r.kind === 'overlay' &&
+                !r.extra &&
+                html`<button type="button" class="tl-row-add" title="Add an overlay (picture in picture) at the playhead" aria-label="Add an overlay" onPointerDown=${(e) => e.stopPropagation()} onClick=${(e) => overlayMenu(e, r.lane)}>
+                  <${Icon} name="plus" size=${11} />
+                </button>`}
               </div>
             </div>`,
           )}
@@ -992,6 +1104,22 @@ export function Timeline({ session, active, narrow }) {
                 onContextMenu=${(e) => clipMenu(e, it.clip, 'text')}
                 onTrimDown=${(e, edge) => onTrimDown(e, it.clip, 'text', edge)}
                 onDblClick=${() => editText(it.clip.id)}
+              />`,
+            )}
+            ${lay.overlay.map(
+              (it) => html`<${OverlayClipView}
+                key=${it.clip.id}
+                item=${it}
+                media=${media[it.clip.mediaId]}
+                zoom=${zoom}
+                top=${overlayTop(Math.floor(it.clip.lane || 0))}
+                height=${dims.overlayH - 6}
+                selected=${selSet.has(it.clip.id)}
+                onPointerDown=${(e) => onClipDown(e, it.clip, 'overlay')}
+                onContextMenu=${(e) => clipMenu(e, it.clip, 'overlay')}
+                onTrimDown=${(e, edge) => onTrimDown(e, it.clip, 'overlay', edge)}
+                onFadeDown=${(e, which) => onFadeDown(e, it.clip, 'overlay', which)}
+                onDblClick=${openInspector}
               />`,
             )}
             ${lay.video.map(

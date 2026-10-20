@@ -13,7 +13,7 @@ test('studio overlay opens inside grok.com under grok CSP and connects', async (
   try {
     const page = await openGrok(ctx.page, '/imagine');
     const frame = await openStudio(page);
-    await expect(frame.locator('.app-tabs .tab')).toHaveCount(4);
+    await expect(frame.locator('.app-tabs .tab')).toHaveCount(5);
     await frame.waitForFunction(() => window.__gis.bridge.connected, null, POLL);
     // Docked (half the window): the connection pill only repeats what the Clips tab shows, so it makes room.
     await expect(frame.locator('.conn-pill.is-on')).toHaveCount(1);
@@ -76,7 +76,7 @@ test('header keeps the tab names readable at docked widths', async () => {
       }, w);
       await frame.waitForFunction((px) => innerWidth === px, w);
     };
-    const ALL = ['Clips', 'Edit', 'Prompts', 'Ingredients'];
+    const ALL = ['Clips', 'Edit', 'Prompts', 'Dialogue', 'Ingredients'];
     // Default right dock = half of a 1440 / 1366 px window: every tab is named, the sequence name gives way.
     for (const w of [720, 683]) {
       await setPanelWidth(w);
@@ -87,7 +87,7 @@ test('header keeps the tab names readable at docked widths', async () => {
     // Narrower: the active tab keeps its name.
     await setPanelWidth(620);
     await frame.locator('.app-tabs .tab[data-tab="edit"]').click();
-    expect(await headerState(frame)).toMatchObject({ names: [null, 'Edit', null, null], overflow: false, rows: 1 });
+    expect(await headerState(frame)).toMatchObject({ names: [null, 'Edit', null, null, null], overflow: false, rows: 1 });
     // Phone-like widths: the tabs get a row of their own, with their names; Export keeps its label.
     for (const w of [480, 380]) {
       await setPanelWidth(w);

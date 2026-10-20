@@ -65,7 +65,7 @@ export function splitAtPlayhead(session) {
         .map((id) => M.findClip(q, id))
         .filter(Boolean)
         .filter((f) => {
-          const it = [...lay.video, ...lay.audio, ...lay.text].find((x) => x.clip.id === f.clip.id);
+          const it = [...lay.video, ...lay.audio, ...lay.text, ...lay.overlay].find((x) => x.clip.id === f.clip.id);
           return it && t > it.start + 1e-3 && t < it.end - 1e-3;
         });
       if (!under.length) {
@@ -74,7 +74,14 @@ export function splitAtPlayhead(session) {
         return r.project;
       }
       for (const f of under) {
-        const r = f.track === 'video' ? M.splitVideoAt(q, t, f.clip.id) : f.track === 'audio' ? M.splitAudioAt(q, f.clip.id, t) : M.splitTextAt(q, f.clip.id, t);
+        const r =
+          f.track === 'video'
+            ? M.splitVideoAt(q, t, f.clip.id)
+            : f.track === 'audio'
+              ? M.splitAudioAt(q, f.clip.id, t)
+              : f.track === 'overlay'
+                ? M.splitOverlayAt(q, f.clip.id, t)
+                : M.splitTextAt(q, f.clip.id, t);
         if (r.rightId) {
           q = r.project;
           count++;
@@ -210,17 +217,28 @@ export function removeMarker(id) {
 
 /**
  * Places media on the timeline in one undo step: visual media is inserted on the main track at the boundary nearest
- * to `time` (appended when time is null), audio goes to an audio lane starting at `audioTime` (lane `audioLane` if
+ * to `time` (appended when time is null) — or, with `overlayLane`, onto that overlay lane from `audioTime` —, audio goes to an audio lane starting at `audioTime` (lane `audioLane` if
  * free). Returns the new clip ids (and selects them).
  */
-export function placeMedia(ids, { time = null, audioTime = null, audioLane = null, label = 'Add to timeline' } = {}) {
+export function placeMedia(ids, { time = null, audioTime = null, audioLane = null, overlayLane = null, label = 'Add to timeline' } = {}) {
   const added = [];
   projectStore.update(
     (p) => {
       let q = p;
       const visual = ids.filter((id) => q.media[id] && q.media[id].kind !== 'audio');
       const audio = ids.filter((id) => q.media[id]?.kind === 'audio');
-      if (visual.length) {
+      if (visual.length && overlayLane != null) {
+        // Dropped on an overlay lane: picture in picture from the drop time, one after another.
+        let cursor = Math.max(0, audioTime ?? time ?? 0);
+        for (const id of visual) {
+          const busy = (q.tracks.overlay || []).some((c) => (c.lane || 0) === overlayLane && cursor < c.start + M.clipDuration(c) - 1e-6 && cursor + M.clipDuration(M.createOverlayClip(q.media[id])) > c.start + 1e-6);
+          const r = M.addOverlayClip(q, id, busy ? { start: cursor } : { start: cursor, lane: overlayLane });
+          if (!r.id) continue;
+          q = r.project;
+          added.push(r.id);
+          cursor += M.clipDuration(M.findClip(q, r.id).clip);
+        }
+      } else if (visual.length) {
         const index = time == null ? q.tracks.video.length : M.insertionIndexAt(M.layoutVideo(q.tracks.video), time);
         const r = M.appendMediaToTimeline(q, visual, { index });
         q = r.project;
@@ -472,7 +490,7 @@ export async function grabFrame(session, mode = 'bin') {
   const player = session.player;
   const p = projectStore.get();
   if (!player || !p) return null;
-  if (!p.tracks.video.length && !p.tracks.text.length) {
+  if (!p.tracks.video.length && !p.tracks.text.length && !(p.tracks.overlay || []).length) {
     toast('Nothing to grab yet — add clips to the timeline first', { kind: 'info' });
     return null;
   }
@@ -508,4 +526,281 @@ export async function grabFrame(session, mode = 'bin') {
     toast(`Could not grab the frame: ${e.message || e}`, { kind: 'error' });
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Overlay track (picture in picture, cutaway, side by side, green screen)
+// ---------------------------------------------------------------------------------------------------------
+
+/**
+ * Adds videos / stills to the overlay track from time t, one after another (lane `lane` when free, else the first
+ * free one), in `mode` (default picture in picture). Selects and returns the new clip ids.
+ */
+export function placeAsOverlay(ids, t, { lane = null, mode = 'pip', label = 'Add overlay' } = {}) {
+  const added = [];
+  projectStore.update(
+    (p) => {
+      let q = p;
+      let cursor = Math.max(0, t);
+      for (const id of ids) {
+        const m = q.media[id];
+        if (!m || m.kind === 'audio') continue;
+        const dur = M.clipDuration(M.createOverlayClip(m));
+        const busy = lane != null && (q.tracks.overlay || []).some((c) => (c.lane || 0) === lane && cursor < c.start + M.clipDuration(c) - 1e-6 && cursor + dur > c.start + 1e-6);
+        const r = M.addOverlayClip(q, id, { start: cursor, mode, ...(lane != null && !busy ? { lane } : {}) });
+        if (!r.id) continue;
+        q = r.project;
+        added.push(r.id);
+        cursor += M.clipDuration(M.findClip(q, r.id).clip);
+      }
+      return q;
+    },
+    { label },
+  );
+  if (added.length) setSelection(added);
+  else toast('Only videos and images can go on the overlay track', { kind: 'info' });
+  return added;
+}
+
+/** Moves a main-track clip onto the overlay track at the same time (the main track closes up). */
+export function moveToOverlay(clipId) {
+  let id = null;
+  projectStore.update(
+    (p) => {
+      const r = M.videoClipToOverlay(p, clipId);
+      id = r.id;
+      return r.project;
+    },
+    { label: 'Move to overlay track' },
+  );
+  if (id) setSelection([id]);
+  return id;
+}
+
+/** Moves an overlay clip back onto the main track (at the cut nearest to its start). */
+export function moveToMain(clipId) {
+  let id = null;
+  projectStore.update(
+    (p) => {
+      const r = M.overlayClipToMain(p, clipId);
+      id = r.id;
+      return r.project;
+    },
+    { label: 'Move to main track' },
+  );
+  if (id) setSelection([id]);
+  return id;
+}
+
+/** Sets the overlay mode of clips (one undo step). */
+export function setOverlayMode(ids, mode) {
+  const name = M.OVERLAY_MODES.find((m) => m.id === mode)?.name || mode;
+  projectStore.update(
+    (p) => {
+      let q = p;
+      for (const id of ids) if (M.findClip(q, id)?.track === 'overlay') q = Ops.updateClipIfChanged(q, id, { mode });
+      return q;
+    },
+    { label: `Overlay: ${name}` },
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Clip tools (iMovie): reverse, freeze frame, instant replay, crop / rotate / flip, auto enhance, EQ, ducking,
+// backgrounds and title styles
+// ---------------------------------------------------------------------------------------------------------
+
+/** The main-track clip a clip tool acts on: the single selected main-track clip, else the one under the playhead. */
+export function targetMainClip(session) {
+  const p = projectStore.get();
+  if (!p) return null;
+  const sel = liveSelection(p).map((id) => M.findClip(p, id)).filter((f) => f?.track === 'video');
+  if (sel.length === 1) return sel[0].clip;
+  const under = M.videoItemsAt(M.layoutVideo(p.tracks.video), session.time());
+  return under.length ? under[under.length - 1].clip : null;
+}
+
+const isVideoClip = (p, clip) => p.media[clip?.mediaId]?.kind === 'video';
+
+/** Toggles "Reverse" on a main-track video clip. */
+export function toggleReverse(clipId) {
+  const p = projectStore.get();
+  const clip = p && M.findClip(p, clipId)?.clip;
+  if (!clip || !isVideoClip(p, clip) || clip.freeze) {
+    toast('Only video clips can play in reverse', { kind: 'info' });
+    return false;
+  }
+  projectStore.update((q) => M.updateClip(q, clipId, { reverse: !clip.reverse }), { label: clip.reverse ? 'Play forward' : 'Reverse clip' });
+  return true;
+}
+
+/** "Add Freeze Frame" at the playhead (on the selected clip when the playhead is over it). Selects the new still. */
+export function freezeFrame(session, { duration = M.DEFAULT_FREEZE_DURATION } = {}) {
+  const t = session.time();
+  if (session.isPlaying()) session.pause();
+  const target = targetMainClip(session);
+  let id = null;
+  projectStore.update(
+    (p) => {
+      const lay = M.layoutVideo(p.tracks.video);
+      const it = target && lay.find((x) => x.clip.id === target.id);
+      const own = it && t >= it.start - 1e-6 && t <= it.end + 1e-6;
+      const r = M.insertFreezeFrame(p, t, { duration, clipId: own ? target.id : null });
+      id = r.id;
+      return r.project;
+    },
+    { label: 'Add freeze frame' },
+  );
+  if (!id) {
+    toast('Put the playhead over a video clip to freeze its frame', { kind: 'info' });
+    return null;
+  }
+  setSelection([id]);
+  return id;
+}
+
+/**
+ * "Instant replay": the last `seconds` before the playhead of the selected (or current) clip play again right after
+ * it, slowed to `rate` × — optionally with an "Instant replay" title over them. One undo step.
+ */
+export function instantReplay(session, { seconds = 2, rate = 0.5, title = true } = {}) {
+  const t = session.time();
+  if (session.isPlaying()) session.pause();
+  const target = targetMainClip(session);
+  if (!target) {
+    toast('Select a video clip (or put the playhead over one) for an instant replay', { kind: 'info' });
+    return null;
+  }
+  let res = null;
+  projectStore.update(
+    (p) => {
+      const r = M.instantReplay(p, t, { seconds, rate, clipId: target.id });
+      if (!r.id) return p;
+      res = r;
+      if (!title) return r.project;
+      const preset = Ops.titlePresetClip('lower-third');
+      return M.addTextClip(r.project, { ...preset, text: 'Instant replay', start: r.start, duration: Math.max(M.MIN_CLIP_DURATION, Math.min(r.duration, 3)) }).project;
+    },
+    { label: 'Instant replay' },
+  );
+  if (!res) {
+    toast('Nothing to replay here — instant replay needs a video clip', { kind: 'info' });
+    return null;
+  }
+  setSelection([res.id]);
+  session.seek(res.start);
+  return res.id;
+}
+
+/** Rotates a main-track clip a quarter turn (dir 1 = right / clockwise, -1 = left). */
+export function rotateClip(clipId, dir = 1) {
+  projectStore.update((p) => M.rotateClip(p, clipId, dir), { label: dir < 0 ? 'Rotate left' : 'Rotate right' });
+}
+
+/** Mirrors a main-track clip ('h' = horizontally, 'v' = vertically). */
+export function flipClip(clipId, axis = 'h') {
+  const key = axis === 'v' ? 'flipV' : 'flipH';
+  const clip = M.findClip(projectStore.get(), clipId)?.clip;
+  if (!clip) return;
+  projectStore.update((p) => M.updateClip(p, clipId, { [key]: !clip[key] }), { label: axis === 'v' ? 'Flip vertically' : 'Flip horizontally' });
+}
+
+/** Sets (or clears, crop = null) a clip's crop; `merge` keeps a drag gesture in one undo step. */
+export function setCrop(clipId, crop, merge = null) {
+  projectStore.update((p) => Ops.updateClipIfChanged(p, clipId, { crop: M.normalizeCrop(crop) }), { label: crop ? 'Crop clip' : 'Reset crop', merge });
+}
+
+/** Loads an image Blob into RGBA pixels (at most `max` px wide). */
+async function blobPixels(blob, max = 160) {
+  const bmp = await createImageBitmap(blob);
+  const s = Math.min(1, max / Math.max(1, bmp.width));
+  const w = Math.max(1, Math.round(bmp.width * s));
+  const h = Math.max(1, Math.round(bmp.height * s));
+  const c = new OffscreenCanvas(w, h);
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(bmp, 0, 0, w, h);
+  bmp.close();
+  return g.getImageData(0, 0, w, h).data;
+}
+
+/**
+ * "Auto enhance": analyzes the clip's middle frame (luminance histogram, mean chroma) and sets brightness, contrast
+ * and saturation to balance it (engine/effects.js autoEnhanceFilters). The rest of the look is kept.
+ */
+export async function autoEnhance(clipId) {
+  const p = projectStore.get();
+  const found = p && M.findClip(p, clipId);
+  if (!found) return null;
+  const c = found.clip;
+  try {
+    const media = await import('../../core/media.js');
+    const { lumaStats, autoEnhanceFilters } = await import('../../engine/effects.js');
+    const t = c.freeze ? c.freezeAt : c.in + (c.out - c.in) / 2;
+    const blob = await media.grabFrame(c.mediaId, p.media[c.mediaId]?.kind === 'image' ? 0 : t, { maxWidth: 160 });
+    const patch = autoEnhanceFilters(lumaStats(await blobPixels(blob)));
+    projectStore.update((q) => {
+      const cur = M.findClip(q, clipId)?.clip;
+      return cur ? Ops.updateClipIfChanged(q, clipId, { filters: { ...M.clipFilters(cur), ...patch } }) : q;
+    }, { label: 'Auto enhance' });
+    return patch;
+  } catch (e) {
+    console.warn('[gis] auto enhance failed', e);
+    toast(`Auto enhance needs the clip’s media: ${e.message || e}`, { kind: 'error' });
+    return null;
+  }
+}
+
+/** Sets a clip's EQ preset (main-track or audio clip). */
+export function setClipEq(clipId, eq, name = eq) {
+  projectStore.update((p) => Ops.updateClipIfChanged(p, clipId, { eq: eq || 'none' }), { label: `Equalizer: ${name}` });
+}
+
+/**
+ * Adds a solid colour / gradient background (iMovie's Backgrounds) on the main track at the cut nearest the playhead:
+ * a PNG at the sequence size goes into the bin, then a 3 s still clip. Two undo steps (add media, add clip).
+ */
+export async function addBackground(session, presetId) {
+  const preset = Ops.BACKGROUND_PRESETS.find((b) => b.id === presetId);
+  const p = projectStore.get();
+  if (!preset || !p) return null;
+  const t = session.time();
+  try {
+    const s = Math.min(1, 1920 / Math.max(p.settings.width || 1280, p.settings.height || 720));
+    const W = Math.max(16, Math.round((p.settings.width || 1280) * s));
+    const H = Math.max(16, Math.round((p.settings.height || 720) * s));
+    const canvas = new OffscreenCanvas(W, H);
+    Ops.paintBackground(canvas.getContext('2d'), preset, W, H);
+    const blob = await canvas.convertToBlob({ type: 'image/png' });
+    const mediaId = await addBlobAsMedia(blob, { name: `Background · ${preset.name}`, origin: 'frame', kind: 'image' });
+    let id = null;
+    projectStore.update(
+      (q) => {
+        const m = q.media[mediaId];
+        if (!m || m.status === 'error') return q;
+        const clip = { ...M.createVideoClip(m, { out: M.DEFAULT_IMAGE_DURATION, fit: 'cover' }), kenBurns: null };
+        id = clip.id;
+        return M.insertVideoClips(q, [clip], M.insertionIndexAt(M.layoutVideo(q.tracks.video), t));
+      },
+      { label: `Add background: ${preset.name}` },
+    );
+    if (!id) throw new Error('the image could not be stored');
+    setSelection([id]);
+    return id;
+  } catch (e) {
+    console.warn('[gis] add background failed', e);
+    toast(`Could not add the background: ${e.message || e}`, { kind: 'error' });
+    return null;
+  }
+}
+
+/** Adds a title in one of the TITLE_PRESETS styles at the playhead (selected, text field focused). */
+export function addTitlePreset(session, presetId) {
+  const opts = Ops.titlePresetClip(presetId);
+  return opts ? addTextAt(session, session.time(), opts) : null;
+}
+
+/** Restyles a title with a preset (keeps its text unless it is still placeholder text). */
+export function applyTitlePreset(clipId, presetId) {
+  const name = Ops.TITLE_PRESETS.find((x) => x.id === presetId)?.name || presetId;
+  projectStore.update((p) => Ops.applyTitlePreset(p, clipId, presetId), { label: `Title style: ${name}` });
 }
