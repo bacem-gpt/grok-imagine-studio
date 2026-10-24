@@ -186,6 +186,10 @@ a {
   min-width: 0;
 }
 
+.brand img {
+  display: block;
+  border-radius: 6px;
+}
 .brand {
   width: 28px;
   height: 28px;
@@ -193,7 +197,6 @@ a {
   display: grid;
   place-items: center;
   color: #fff;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
   flex: none;
 }
 

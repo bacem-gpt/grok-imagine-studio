@@ -5,6 +5,7 @@
 //                      player's time signal without re-rendering the panel.
 //   TimeReadout, useMediaSrc, createSignal / useSignalValue (high-frequency values without full re-renders).
 import { html, useState, useEffect, useRef, useMemo } from '../../../vendor/preact-htm.mjs';
+import { trackPointer } from '../pointer.js';
 import { getMediaUrl, peekMediaUrl } from '../../core/media.js';
 import { clamp, formatTime } from '../../core/utils.js';
 import { cx } from '../kit.js';
@@ -339,25 +340,23 @@ export function ScrubBar({ duration, time, marks = EMPTY_MARKS, onSeek, onMarks,
     onMarks?.(m, phase, { role: g.role, key: g.key });
     onSeek?.(g.role === 'in' ? m.in : Math.max(0, m.out - 0.001), phase);
   };
+  const applyRef = useRef(apply);
+  applyRef.current = apply; // the drag calls the latest render's apply (current marks / duration)
   const onDown = (e) => {
     if (disabled || !(d > 0) || e.button !== 0) return;
     e.preventDefault();
     const role = e.target.closest?.('[data-handle]')?.dataset.handle || 'seek';
     drag.current = { role, id: e.pointerId, key: `scrub-${role}-${e.pointerId}-${Math.round(e.timeStamp)}` };
-    try {
-      ref.current.setPointerCapture(e.pointerId);
-    } catch {
-      /* ignore */
-    }
     apply(e, 'start');
-  };
-  const onMove = (e) => {
-    if (drag.current?.id === e.pointerId) apply(e, 'move');
-  };
-  const onUp = (e) => {
-    if (drag.current?.id !== e.pointerId) return;
-    apply(e, 'end');
-    drag.current = null;
+    // Always ends (ui/pointer.js): a missed release never leaves the bar following the mouse.
+    trackPointer(e, {
+      target: ref.current,
+      onMove: (ev) => applyRef.current(ev, 'move'),
+      onEnd: (ev) => {
+        applyRef.current(ev, 'end');
+        drag.current = null;
+      },
+    });
   };
 
   const b = markBounds(marks, d);
@@ -367,9 +366,6 @@ export function ScrubBar({ duration, time, marks = EMPTY_MARKS, onSeek, onMarks,
     class=${cx('src-scrub', disabled && 'is-disabled', b.active && 'has-range', klass)}
     ref=${ref}
     onPointerDown=${onDown}
-    onPointerMove=${onMove}
-    onPointerUp=${onUp}
-    onPointerCancel=${onUp}
   >
     <div class="src-scrub-track">
       ${strip ? html`<div class="src-scrub-strip" style=${`background-image:url("${strip}")`}></div>` : html`<div class="src-scrub-ticks"></div>`}

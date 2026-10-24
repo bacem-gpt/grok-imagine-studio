@@ -5,9 +5,10 @@
 // card); the buttons inside a card stay out of the Tab order, the keys (Enter, E, P, X, 1–5…) and the context menu
 // reach them. Cards are memoized and read their own item, so an update of one item re-renders one card.
 import { html, useRef, useState } from '../../../vendor/preact-htm.mjs';
+import { onDragSessionEnd } from '../pointer.js';
 import { uiStore } from '../../core/store.js';
 import { pluralize } from '../../core/utils.js';
-import { useProject, useStore, usePage, useUI, useElementSize } from '../hooks.js';
+import { useProject, useStore, usePage, useUI, useElementSize, useDragHighlightReset } from '../hooks.js';
 import { Icon, IconButton, Button, Select, EmptyState, showMenu, cx } from '../kit.js';
 import {
   KIND_OPTIONS,
@@ -99,17 +100,19 @@ function springLoadEditTab(onEnd) {
       uiStore.set((s) => (s.tab === 'edit' ? s : { ...s, tab: 'edit' }));
     }, SPRING_DELAY);
   };
+  let stopped = false;
   const stop = () => {
+    if (stopped) return;
+    stopped = true;
     leaveTab();
     document.removeEventListener('dragover', onOver, true);
-    window.removeEventListener('dragend', stop, true);
-    window.removeEventListener('drop', stop, true);
+    offSession();
     if (stopSpring === stop) stopSpring = null;
     onEnd?.();
   };
   document.addEventListener('dragover', onOver, true);
-  window.addEventListener('dragend', stop, true);
-  window.addEventListener('drop', stop, true);
+  // drop / dragend, and also a drag that ended without them reaching us (dropped outside the frame, card re-rendered)
+  const offSession = onDragSessionEnd(stop);
   stopSpring = stop;
 }
 
@@ -118,6 +121,7 @@ const hasMediaDrag = (e) => [...(e.dataTransfer?.types || [])].includes(MEDIA_DR
 /** Shown at the bottom of the bin while cards are dragged: drop to append them, or hold over the Edit tab. */
 function DropBar({ count }) {
   const [over, setOver] = useState(false);
+  useDragHighlightReset(over, () => setOver(false));
   return html`<div
     class=${cx('bin-dropbar', over && 'is-over')}
     onDragEnter=${(e) => hasMediaDrag(e) && setOver(true)}

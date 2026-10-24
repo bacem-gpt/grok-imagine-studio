@@ -6,10 +6,11 @@
 // (one merge key per drag gesture).
 
 import { html, useState, useEffect, useRef, useMemo, useLayoutEffect } from '../../../vendor/preact-htm.mjs';
+import { trackPointer } from '../pointer.js';
 import { projectStore, uiStore, createStore } from '../../core/store.js';
 import * as M from '../../core/model.js';
 import { formatTime, formatDuration, clamp, pluralize } from '../../core/utils.js';
-import { useProject, useUI, useStore, useElementSize } from '../hooks.js';
+import { useProject, useUI, useStore, useElementSize, useDragHighlightReset } from '../hooks.js';
 import { Icon, IconButton, Button, Kbd, showMenu, promptDialog, pickFiles, cx } from '../kit.js';
 import {
   clampZoom,
@@ -46,55 +47,34 @@ const TIGHT_W = 600;
  * Pointer gesture with capture: onStart (after `threshold` px; return false to abort) -> onMove -> onEnd,
  * or onClick when the pointer never moved far enough.
  */
-function beginGesture(e, { threshold = 3, onStart, onMove, onEnd, onClick }) {
-  const el = e.currentTarget;
-  const id = e.pointerId;
+function beginGesture(e, { threshold = 3, onStart, onMove, onEnd, onClick, onCancel }) {
   const x0 = e.clientX;
   const y0 = e.clientY;
   let started = false;
   let ctx = null;
-  try {
-    el.setPointerCapture(id);
-  } catch {
-    /* ignore */
-  }
-  const cleanup = () => {
-    el.removeEventListener('pointermove', move);
-    el.removeEventListener('pointerup', up);
-    el.removeEventListener('pointercancel', up);
-    el.removeEventListener('lostpointercapture', lost);
-  };
-  const finish = (ev, cancelled) => {
-    cleanup();
-    if (started) onEnd?.({ ev, ctx, cancelled, dx: ev.clientX - x0, dy: ev.clientY - y0 });
-    else if (!cancelled) onClick?.(ev);
-  };
-  const move = (ev) => {
-    if (ev.pointerId !== id) return;
-    const dx = ev.clientX - x0;
-    const dy = ev.clientY - y0;
-    if (!started) {
-      if (Math.hypot(dx, dy) < threshold) return;
-      started = true;
-      ctx = onStart ? onStart(ev) : {};
-      if (ctx === false) {
-        started = false;
-        cleanup();
-        return;
+  const stop = trackPointer(e, {
+    onMove: (ev) => {
+      const dx = ev.clientX - x0;
+      const dy = ev.clientY - y0;
+      if (!started) {
+        if (Math.hypot(dx, dy) < threshold) return;
+        started = true;
+        ctx = onStart ? onStart(ev) : {};
+        if (ctx === false) {
+          started = false;
+          stop();
+          return;
+        }
       }
-    }
-    onMove?.({ dx, dy, ev, ctx });
-  };
-  const up = (ev) => {
-    if (ev.pointerId === id) finish(ev, ev.type === 'pointercancel');
-  };
-  const lost = (ev) => {
-    if (ev.pointerId === id) finish(ev, false);
-  };
-  el.addEventListener('pointermove', move);
-  el.addEventListener('pointerup', up);
-  el.addEventListener('pointercancel', up);
-  el.addEventListener('lostpointercapture', lost);
+      onMove?.({ dx, dy, ev, ctx });
+    },
+    // Ends on release, and also when the release is never delivered (ui/pointer.js): a clip never stays glued.
+    onEnd: (ev, { cancelled }) => {
+      if (started) onEnd?.({ ev, ctx, cancelled, dx: ev.clientX - x0, dy: ev.clientY - y0 });
+      else if (cancelled) onCancel?.(ev);
+      else onClick?.(ev);
+    },
+  });
 }
 
 function paintRuler(canvas, { width, height, zoom, scrollLeft, duration }) {
@@ -677,6 +657,7 @@ export function Timeline({ session, active, narrow }) {
       },
       onEnd: () => (dragRef.current = false),
       onClick: () => (dragRef.current = false),
+      onCancel: () => (dragRef.current = false),
     });
   };
 
@@ -948,6 +929,8 @@ export function Timeline({ session, active, narrow }) {
   const onDragLeave = (e) => {
     if (!e.currentTarget.contains(e.relatedTarget)) clearDrop();
   };
+  // The drop preview never outlives the drag (a drop elsewhere, Esc, the drag leaving the frame…).
+  useDragHighlightReset(mode?.type === 'drop', clearDrop);
   const onDrop = (e) => {
     if (!acceptsDrag(e)) return;
     e.preventDefault();

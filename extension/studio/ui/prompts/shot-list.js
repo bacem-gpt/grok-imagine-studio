@@ -2,7 +2,8 @@
 // reorder (one undo step per drop), drop bin clips on a card to link them as takes, context menus, and the footer
 // with the manual "Send next" queue, batch queue progress and "Assemble timeline".
 import { html, useState, useRef, useEffect } from '../../../vendor/preact-htm.mjs';
-import { useProject, useStore, usePage } from '../hooks.js';
+import { trackPointer } from '../pointer.js';
+import { useProject, useStore, usePage, useDragHighlightReset } from '../hooks.js';
 import { Icon, IconButton, Button, EmptyState, showMenu, confirmDialog, toast, cx, MEDIA_DRAG_TYPE } from '../kit.js';
 import { formatDuration, pluralize } from '../../core/utils.js';
 import { projectStore } from '../../core/store.js';
@@ -89,6 +90,7 @@ function ShotCard({ shot, index, total, selected, sending, dragging, dropTarget,
   const refs = Array.isArray(shot.ingredientIds) ? shot.ingredientIds : [];
   const offers = useStore(promptsUi, (s) => s.offers[shot.id]?.length || 0);
   const [over, setOver] = useState(false);
+  useDragHighlightReset(over, () => setOver(false));
   const excerpt = (shot.prompt || '').replace(/\s+/g, ' ').trim();
 
   const onDrop = (e) => {
@@ -222,10 +224,7 @@ function useReorder(listRef, shots) {
       const to = targetIndex(ev.clientY);
       setDrag((d) => (d && d.to === to ? d : { id, from, to }));
     };
-    const up = (ev) => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', up);
+    const up = (ev, cancelled) => {
       cancelAnimationFrame(scrollRaf.current);
       document.body.classList.remove('pr-dragging');
       const st = stateRef.current;
@@ -238,14 +237,13 @@ function useReorder(listRef, shots) {
       };
       window.addEventListener('click', swallow, { capture: true, once: true });
       setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 50);
-      const to = ev.type === 'pointercancel' ? st.from : targetIndex(ev.clientY);
+      const to = cancelled ? st.from : targetIndex(ev.clientY);
       setDrag(null);
       const finalIndex = to > st.from ? to - 1 : to;
       if (finalIndex !== st.from) projectStore.update((q) => S.moveShot(q, st.id, finalIndex), { label: 'Reorder shots', merge: `reorder-${st.id}-${Date.now()}` });
     };
-    window.addEventListener('pointermove', move, { passive: false });
-    window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', up);
+    // Always ends (ui/pointer.js): a release outside the studio frame never leaves the grabbing cursor on.
+    trackPointer(e, { target: card, onMove: move, onEnd: (ev, { cancelled }) => up(ev, cancelled) });
   };
   return { drag, onPointerDown };
 }

@@ -9,7 +9,7 @@
 import { html, useState, useEffect, useRef } from '../../vendor/preact-htm.mjs';
 import { iconMarkup } from './icons.js';
 import { createStore } from '../core/store.js';
-import { useStore } from './hooks.js';
+import { useStore, useDragHighlightReset } from './hooks.js';
 import { useHotkeys, comboLabel } from './hotkeys.js';
 import { clamp, formatTime, parseTime, uid, copyText } from '../core/utils.js';
 
@@ -240,6 +240,7 @@ export function ProgressBar({ value = 0, indeterminate = false, label }) {
 /** Wraps children; accepts dropped files (and optional custom drag types). */
 export function DropZone({ onFiles, onDropData, accept = null, children, class: klass = '', label = 'Drop files to import' }) {
   const [over, setOver] = useState(0);
+  useDragHighlightReset(over > 0, () => setOver(0)); // never leave the overlay up (a child may stop the drop)
   const isFileDrag = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
   return html`<div
     class=${cx('dropzone', over > 0 && 'is-over', klass)}

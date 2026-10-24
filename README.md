@@ -1,12 +1,21 @@
+<p align="center"><img src="brand/logo-512.png" width="112" alt="Imagine Studio logo"></p>
+
 # Imagine Studio for Grok
 
-> Unofficial, independent project — not affiliated with, endorsed by, or sponsored by xAI. "Grok" is a trademark of its owner.
+**Edit your Grok Imagine videos without leaving Grok.** A free Chrome extension that docks a full video editor and
+prompt workshop next to [grok.com/imagine](https://grok.com/imagine).
 
-**An in-place video sequence editor and prompt workshop for [Grok Imagine](https://grok.com/imagine).**
+**[Website & demo](https://bacem-gpt.github.io/grok-imagine-studio/)** ·
+**[Download the extension](https://github.com/bacem-gpt/grok-imagine-studio/releases/latest/download/imagine-studio-for-grok.zip)** ·
+[Install steps](#install-developer-mode) · [Report a bug](https://github.com/bacem-gpt/grok-imagine-studio/issues)
+
+<p align="center"><img src="brand/demo/teaser.gif" width="800" alt="Dialogue planner demo: a dialogue split into parts, one shot per part, each generated video tagged with its part"></p>
+
+> Unofficial, independent project — not affiliated with, endorsed by, or sponsored by xAI. "Grok" is a trademark of its owner. Demo footage generated with Grok Imagine.
 
 Grok generates a lot of clips. Picking the good ones, trimming them, grabbing stills, laying music from another
 file under them, adding transitions and exporting used to mean downloading everything into a separate editor and
-coming back to Grok for the next round. Grok Imagine Studio does all of that **inside grok.com**, in a panel docked
+coming back to Grok for the next round. Imagine Studio does all of that **inside grok.com**, in a panel docked
 next to the Grok page, and it helps you prepare what you send to Grok next: shot lists, prompt texts and reference
 images ("ingredients").
 
@@ -87,7 +96,7 @@ images ("ingredients").
 
 ## Install (developer mode)
 
-1. Download `grok-imagine-studio-1.1.0.zip` from the [latest release](https://github.com/bacem-gpt/grok-imagine-studio/releases/latest) and unzip it (or clone this repo and use the `extension/` folder). No build step is needed.
+1. Download [`imagine-studio-for-grok.zip`](https://github.com/bacem-gpt/grok-imagine-studio/releases/latest/download/imagine-studio-for-grok.zip) from the latest release and unzip it (or clone this repo and use the `extension/` folder). No build step is needed.
 2. Open `chrome://extensions` (Chrome, Edge, Brave, Arc, Opera; Chrome 116 or later), enable **Developer mode**.
 3. Click **Load unpacked** and select the unzipped folder (the one containing `manifest.json`).
 4. Open (or reload) [grok.com/imagine](https://grok.com/imagine). A **STUDIO** tab appears on the right edge of the page.

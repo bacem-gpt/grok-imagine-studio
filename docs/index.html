@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Imagine Studio for Grok — edit Grok Imagine videos without leaving Grok</title>
+<meta name="description" content="Free Chrome extension: pick the best Grok Imagine clips, trim them, add music, transitions, titles and subtitles, plan long dialogues one 15-second video at a time, and export MP4 — all inside grok.com. No account, nothing uploaded.">
+<link rel="canonical" href="https://bacem-gpt.github.io/grok-imagine-studio/">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<meta name="theme-color" content="#0b0d1a">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Imagine Studio for Grok — edit your Grok videos in place">
+<meta property="og:description" content="Stop downloading. Pick, trim, cut together and export your Grok Imagine videos right on grok.com. Free & open source Chrome extension.">
+<meta property="og:url" content="https://bacem-gpt.github.io/grok-imagine-studio/">
+<meta property="og:image" content="https://bacem-gpt.github.io/grok-imagine-studio/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:video" content="https://bacem-gpt.github.io/grok-imagine-studio/assets/demo/promo.mp4">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Imagine Studio for Grok">
+<meta name="twitter:description" content="A free video editor that lives inside grok.com: pick, trim, add music & transitions, plan dialogues, export MP4.">
+<meta name="twitter:image" content="https://bacem-gpt.github.io/grok-imagine-studio/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Imagine Studio for Grok","applicationCategory":"MultimediaApplication","operatingSystem":"Chrome, Edge, Brave, Arc, Opera","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"description":"In-place video editor and prompt workshop for Grok Imagine.","url":"https://bacem-gpt.github.io/grok-imagine-studio/","image":"https://bacem-gpt.github.io/grok-imagine-studio/assets/og.png"}
+</script>
+<style>
+:root{--bg:#07080f;--bg1:#0d0f1c;--bg2:#141729;--line:rgba(255,255,255,.09);--t0:#f4f4f9;--t1:#c3c3d4;--t2:#8e8ea6;--a:#8f7dff;--a2:#4cc9f0;--grad:linear-gradient(90deg,#a99bff,#4cc9f0);--r:16px}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--t0);font:16px/1.6 Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+img,video{max-width:100%;display:block}
+.wrap{width:min(1160px,100% - 32px);margin:0 auto}
+.grad{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+/* nav */
+nav{position:sticky;top:0;z-index:20;background:rgba(7,8,15,.72);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:22px;height:64px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;text-decoration:none;font-size:17px;white-space:nowrap}
+.brand img{width:34px;height:34px}
+.links{display:flex;gap:22px;margin-left:auto;font-size:14.5px;color:var(--t1)}
+.links a{text-decoration:none}.links a:hover{color:var(--t0)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;padding:13px 22px;border-radius:999px;font-weight:700;text-decoration:none;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--t0);font-size:15.5px;cursor:pointer;white-space:nowrap;transition:transform .15s,box-shadow .15s,background .15s}
+.btn:hover{transform:translateY(-1px);background:rgba(255,255,255,.08)}
+.btn-p{background:var(--grad);color:#0b0d1a;border:0;box-shadow:0 10px 40px rgba(143,125,255,.35)}
+.btn-p:hover{background:var(--grad);box-shadow:0 14px 50px rgba(76,201,240,.4)}
+.btn-sm{padding:9px 16px;font-size:14px}
+/* hero */
+.hero{position:relative;overflow:hidden;padding:84px 0 40px;background:radial-gradient(ellipse 80% 60% at 70% 20%,rgba(143,125,255,.16),transparent 70%),url(assets/hero.jpg) right top/cover no-repeat}
+.hero:after{content:'';position:absolute;inset:auto 0 0 0;height:180px;background:linear-gradient(transparent,var(--bg))}
+.hero .wrap{position:relative;z-index:1}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:999px;border:1px solid rgba(169,155,255,.35);background:rgba(143,125,255,.1);color:#d4ccff;font-size:13.5px;font-weight:600}
+h1{font-size:clamp(38px,6.2vw,72px);line-height:1.03;letter-spacing:-.03em;margin:22px 0 20px;max-width:880px}
+.lead{font-size:clamp(17px,2vw,21px);color:var(--t1);max-width:680px;margin:0 0 32px}
+.ctas{display:flex;flex-wrap:wrap;gap:12px}
+.trust{display:flex;flex-wrap:wrap;gap:8px 22px;margin-top:26px;color:var(--t2);font-size:14px}
+.trust span:before{content:'✓';color:#3ddc97;margin-right:7px;font-weight:800}
+.frame{position:relative;margin-top:56px;border-radius:18px;overflow:hidden;border:1px solid rgba(255,255,255,.12);box-shadow:0 40px 120px rgba(0,0,0,.65),0 0 0 1px rgba(143,125,255,.15);background:#000}
+.frame-bar{display:flex;align-items:center;gap:7px;height:34px;padding:0 14px;background:#151827;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--t2)}
+.frame-bar i{width:11px;height:11px;border-radius:50%;background:#3a3d52}
+.frame-bar b{margin-left:14px;padding:3px 12px;border-radius:7px;background:#0d0f1c;font-weight:500}
+.frame video{width:100%;aspect-ratio:1280/800;object-fit:cover}
+.unmute{position:absolute;right:16px;bottom:16px}
+/* sections */
+section{padding:88px 0}
+.sec-k{color:#a99bff;font-weight:700;letter-spacing:.12em;text-transform:uppercase;font-size:13px}
+h2{font-size:clamp(30px,4vw,46px);line-height:1.1;letter-spacing:-.02em;margin:12px 0 16px}
+.sec-lead{color:var(--t1);font-size:18px;max-width:700px;margin:0}
+.ba{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:40px}
+.card{border:1px solid var(--line);background:linear-gradient(180deg,var(--bg1),rgba(13,15,28,.5));border-radius:var(--r);padding:26px}
+.card h3{margin:0 0 12px;font-size:19px}
+.steps{margin:0;padding-left:20px;color:var(--t1)}
+.steps li{margin:6px 0}
+.bad h3{color:#ff9aa4}.good h3{color:#7ef0bf}
+.feature{display:grid;grid-template-columns:1fr 1.25fr;gap:56px;align-items:center;padding:56px 0;border-top:1px solid var(--line)}
+.feature:nth-child(even) .f-media{order:-1}
+.feature h3{font-size:clamp(25px,3vw,34px);letter-spacing:-.02em;line-height:1.15;margin:10px 0 14px}
+.feature p{color:var(--t1);margin:0 0 16px}
+.feature ul{margin:0;padding:0;list-style:none;color:var(--t1)}
+.feature li{padding:5px 0 5px 28px;position:relative}
+.feature li:before{content:'';position:absolute;left:0;top:13px;width:14px;height:8px;border-left:2.5px solid #a99bff;border-bottom:2.5px solid #a99bff;transform:rotate(-45deg)}
+.f-media{border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,.12);box-shadow:0 24px 70px rgba(0,0,0,.55);background:#000}
+.f-media video{width:100%;aspect-ratio:1280/800;object-fit:cover}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:40px}
+.tile{border:1px solid var(--line);background:var(--bg1);border-radius:14px;padding:18px}
+.tile b{display:block;font-size:15.5px;margin-bottom:4px}
+.tile span{color:var(--t2);font-size:14px;line-height:1.45}
+.install{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:40px 0 28px}
+.install .card{padding:22px}
+.install .n{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--grad);color:#0b0d1a;font-weight:800;margin-bottom:12px}
+.install p{margin:6px 0 0;color:var(--t1);font-size:15px}
+code{font-family:ui-monospace,Menlo,Consolas,monospace;background:rgba(255,255,255,.07);padding:2px 7px;border-radius:6px;font-size:.92em}
+.note{color:var(--t2);font-size:14.5px}
+details{border:1px solid var(--line);background:var(--bg1);border-radius:14px;padding:18px 22px;margin:10px 0}
+summary{cursor:pointer;font-weight:700;font-size:17px;list-style:none;display:flex;justify-content:space-between;gap:16px}
+summary:after{content:'+';color:#a99bff;font-size:22px;line-height:1}
+details[open] summary:after{content:'–'}
+details p{color:var(--t1);margin:12px 0 0}
+.final{text-align:center;padding:100px 0;background:radial-gradient(ellipse 60% 80% at 50% 100%,rgba(76,201,240,.14),transparent 70%)}
+.final h2{max-width:760px;margin:12px auto 18px}
+.final .ctas{justify-content:center}
+footer{border-top:1px solid var(--line);padding:34px 0;color:var(--t2);font-size:14px}
+footer .wrap{display:flex;flex-wrap:wrap;gap:12px 28px;align-items:center}
+footer .sp{flex:1}
+.disclaimer{width:100%;font-size:13px;opacity:.85}
+@media (max-width:900px){
+  .links{display:none}
+  .feature{grid-template-columns:1fr;gap:26px}
+  .feature:nth-child(even) .f-media{order:0}
+  .grid{grid-template-columns:repeat(2,1fr)}
+  .install{grid-template-columns:1fr 1fr}
+  .ba{grid-template-columns:1fr}
+}
+@media (max-width:560px){
+  .hero{padding-top:52px;background:linear-gradient(180deg,rgba(7,8,15,.55),rgba(7,8,15,.8)),url(assets/hero.jpg) 70% top/cover no-repeat}
+  .grid,.install{grid-template-columns:1fr}
+  nav .btn-sm{display:none}
+  section{padding:64px 0}
+  .ctas .btn{flex:1 1 100%}
+}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.btn{transition:none}}
+</style>
+</head>
+<body>
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#"><img src="assets/logo.png" alt="" width="34" height="34">Imagine Studio <span class="grad">for Grok</span></a>
+    <div class="links"><a href="#features">Features</a><a href="#dialogue">Dialogue</a><a href="#install">Install</a><a href="#faq">FAQ</a><a href="https://github.com/bacem-gpt/grok-imagine-studio">GitHub</a></div>
+    <a class="btn btn-p btn-sm" href="#install">Get it free</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="eyebrow">✦ Free Chrome extension for Grok Imagine</span>
+    <h1>Stop downloading.<br><span class="grad">Edit your Grok videos in place.</span></h1>
+    <p class="lead">Grok makes twenty clips. You need four of them — trimmed, in order, with music. Imagine Studio is a full video editor docked right next to Grok: pick the best takes, cut them together and export, without ever leaving grok.com.</p>
+    <div class="ctas">
+      <a class="btn btn-p" href="#install">⬇ Add to Chrome — free</a>
+      <a class="btn" href="assets/demo/promo.mp4">▶ Watch the 70-second demo</a>
+    </div>
+    <div class="trust"><span>No account</span><span>Nothing uploaded — runs in your browser</span><span>Open source</span><span>Chrome · Edge · Brave · Arc</span></div>
+    <div class="frame" id="demo">
+      <div class="frame-bar"><i></i><i></i><i></i><b>Imagine Studio — editing Grok Imagine clips</b></div>
+      <video id="promo" src="assets/demo/hero-loop.mp4" poster="assets/demo/edit.jpg" autoplay muted loop playsinline preload="metadata" aria-label="Product demo: collecting, editing, dialogue planning and exporting Grok Imagine videos"></video>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <div class="sec-k">Why</div>
+    <h2>The round trip is the slowest part of making a Grok film.</h2>
+    <p class="sec-lead">Every new shot means another download, another import into a desktop editor, another trip back to Grok to generate the next take. Imagine Studio removes the trip.</p>
+    <div class="ba">
+      <div class="card bad"><h3>Without it</h3><ol class="steps"><li>Download every clip, one by one</li><li>Rename them so you know which is which</li><li>Open a desktop editor, import, cut</li><li>Go back to Grok for the next shot</li><li>Download again… repeat</li></ol></div>
+      <div class="card good"><h3>With Imagine Studio</h3><ol class="steps"><li>Click <b>+ Bin</b> on the clips you like (or auto-collect)</li><li>Trim, reorder, add transitions and music in the docked panel</li><li>Send the next prompt to Grok from the same panel</li><li>New takes land in the right shot automatically</li><li>Export MP4 — done</li></ol></div>
+    </div>
+  </div>
+</section>
+
+<section id="features" style="padding-top:20px">
+  <div class="wrap">
+    <div class="sec-k">Features</div>
+    <h2>Everything between “generate” and “publish”.</h2>
+    <div>
+      <div class="feature">
+        <div><div class="sec-k">Collect &amp; pick</div><h3>Every Grok video, in one bin</h3>
+          <p>The studio sees the videos Grok generates for you — with their prompts — and collects them in one click, or automatically.</p>
+          <ul><li>Hover to scrub through any clip</li><li>Pick, reject and rate with the keyboard in Review mode</li><li>One-click delete with Undo, and a clean-up for rejects</li><li>“Last frame → Grok” to continue a shot seamlessly</li></ul></div>
+        <div class="f-media"><video data-lazy src="assets/demo/collect.mp4" poster="assets/demo/collect.jpg" muted loop playsinline preload="none"></video></div>
+      </div>
+      <div class="feature">
+        <div><div class="sec-k">Edit</div><h3>A real timeline — iMovie-level, inside your Grok tab</h3>
+          <p>Trim, split and reorder on a magnetic track, then make it look finished.</p>
+          <ul><li>22 transitions, titles in 11 styles, Ken Burns, colour looks</li><li>Picture in picture, cutaway, split screen, green screen</li><li>Reverse, freeze frame, instant replay, crop &amp; rotate</li><li>Music or voice from a file or URL, EQ, ducking, voice-over recording</li></ul></div>
+        <div class="f-media"><video data-lazy src="assets/demo/edit.mp4" poster="assets/demo/edit.jpg" muted loop playsinline preload="none"></video></div>
+      </div>
+      <div class="feature" id="dialogue">
+        <div><div class="sec-k">Dialogue planner</div><h3>Long dialogue? One part per 15-second video.</h3>
+          <p>Paste the whole scene. It's split into parts that each fit one generated video — never cutting a line in the middle — and every part becomes a shot.</p>
+          <ul><li>Each generated video is tagged with its part (P1, P2…) — you always know which video says which lines</li><li>Scene, speaker voices and phrases go into every prompt</li><li>Assemble in dialogue order and add subtitles in one click</li></ul></div>
+        <div class="f-media"><video data-lazy src="assets/demo/dialogue.mp4" poster="assets/demo/dialogue.jpg" muted loop playsinline preload="none"></video></div>
+      </div>
+      <div class="feature">
+        <div><div class="sec-k">Prompt workshop</div><h3>The phrases you type every time, one click away</h3>
+          <p>Keep “nobody speaks”, “camera angle from top”, “no text on screen” as chips under every prompt. Click in, click out.</p>
+          <ul><li>120 prepared phrases in 10 categories, plus your own</li><li>Phrase sets apply several at once</li><li>Shot list, prompt builder, character bible, reference images</li><li>Send to Grok's prompt box — takes link back to their shot</li></ul></div>
+        <div class="f-media"><video data-lazy src="assets/demo/phrases.mp4" poster="assets/demo/phrases.jpg" muted loop playsinline preload="none"></video></div>
+      </div>
+      <div class="feature">
+        <div><div class="sec-k">Export</div><h3>MP4 in seconds. In your browser.</h3>
+          <p>Rendered frame by frame with WebCodecs on your own machine — the preview and the file match exactly.</p>
+          <ul><li>MP4 (H.264 + AAC) or WebM, any resolution and frame rate</li><li>PNG stills and WAV audio mixdowns</li><li>No upload, no account, no watermark</li></ul></div>
+        <div class="f-media"><video data-lazy src="assets/demo/export.mp4" poster="assets/demo/export.jpg" muted loop playsinline preload="none"></video></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="padding-top:20px">
+  <div class="wrap">
+    <div class="sec-k">And more</div>
+    <h2>Built for people who make whole films with Grok.</h2>
+    <div class="grid">
+      <div class="tile"><b>Docks anywhere</b><span>Right, bottom, floating, full window, or its own tab.</span></div>
+      <div class="tile"><b>Takes ↔ shots</b><span>New videos link to the shot whose prompt made them.</span></div>
+      <div class="tile"><b>Reference images</b><span>Crop, combine into sheets, attach to Grok in one click.</span></div>
+      <div class="tile"><b>Subtitles</b><span>Your dialogue as timed captions over the clips.</span></div>
+      <div class="tile"><b>Voice-over</b><span>Record over the timeline, auto-ducking under it.</span></div>
+      <div class="tile"><b>Undo everything</b><span>Full undo / redo, autosave, multi-window safe.</span></div>
+      <div class="tile"><b>Keyboard first</b><span>J K L shuttle, I / O marks, S split, P / X review.</span></div>
+      <div class="tile"><b>Private</b><span>No servers, no analytics. Your clips stay on your machine.</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="install" style="background:linear-gradient(180deg,transparent,rgba(143,125,255,.06),transparent)">
+  <div class="wrap">
+    <div class="sec-k">Install</div>
+    <h2>Up and running in a minute.</h2>
+    <p class="sec-lead">Free and open source. Works in Chrome, Edge, Brave, Arc and Opera (Chrome 116+).</p>
+    <div class="install">
+      <div class="card"><span class="n">1</span><b>Download</b><p><a href="https://github.com/bacem-gpt/grok-imagine-studio/releases/latest/download/imagine-studio-for-grok.zip">the extension zip</a> and unzip it.</p></div>
+      <div class="card"><span class="n">2</span><b>Open extensions</b><p>Go to <code>chrome://extensions</code> and turn on <b>Developer mode</b>.</p></div>
+      <div class="card"><span class="n">3</span><b>Load it</b><p>Click <b>Load unpacked</b> and pick the unzipped folder.</p></div>
+      <div class="card"><span class="n">4</span><b>Open Grok</b><p>Go to <a href="https://grok.com/imagine">grok.com/imagine</a> and click the <b>STUDIO</b> tab — or press <code>Alt+Shift+S</code>.</p></div>
+    </div>
+    <div class="ctas">
+      <a class="btn btn-p" href="https://github.com/bacem-gpt/grok-imagine-studio/releases/latest/download/imagine-studio-for-grok.zip">⬇ Download the extension (free)</a>
+      <a class="btn" href="https://github.com/bacem-gpt/grok-imagine-studio">★ Star it on GitHub</a>
+    </div>
+    <p class="note" style="margin-top:18px">One-click “Add to Chrome” from the Chrome Web Store is on its way. Until then, the steps above install exactly the same extension.</p>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap" style="max-width:860px">
+    <div class="sec-k">FAQ</div>
+    <h2>Questions</h2>
+    <details><summary>Is it free?</summary><p>Yes — free and open source (MIT). No account, no subscription, no watermark.</p></details>
+    <details><summary>Is it made by xAI?</summary><p>No. Imagine Studio is an independent project, not affiliated with, endorsed by or sponsored by xAI. “Grok” is a trademark of its owner. It works with your own Grok account in your own browser.</p></details>
+    <details><summary>Where do my videos go?</summary><p>Nowhere. Clips, projects and exports stay in your browser's local storage. The extension has no server and no analytics. <a href="PRIVACY">Privacy policy</a>.</p></details>
+    <details><summary>Does it need a Grok subscription?</summary><p>It edits whatever Grok Imagine generates for you. If you can generate videos on grok.com, you can edit them with Imagine Studio.</p></details>
+    <details><summary>Can I add my own music or voice?</summary><p>Yes — from a file, any URL, another clip's sound, or record a voice-over straight onto the timeline. Ducking lowers the music under the voice automatically.</p></details>
+    <details><summary>Which browsers?</summary><p>Chrome, Edge, Brave, Arc and Opera on desktop (Chrome 116 or later).</p></details>
+    <details><summary>I found a bug / I want a feature</summary><p><a href="https://github.com/bacem-gpt/grok-imagine-studio/issues">Open an issue on GitHub</a> — it's read.</p></details>
+  </div>
+</section>
+
+<section class="final">
+  <div class="wrap">
+    <div class="sec-k">Ready?</div>
+    <h2>Make your next Grok film without leaving Grok.</h2>
+    <div class="ctas">
+      <a class="btn btn-p" href="https://github.com/bacem-gpt/grok-imagine-studio/releases/latest/download/imagine-studio-for-grok.zip">⬇ Add to Chrome — free</a>
+      <a class="btn" href="https://twitter.com/intent/tweet?text=Edit%20your%20Grok%20Imagine%20videos%20without%20leaving%20Grok%20%E2%80%94%20free%20Chrome%20extension&url=https%3A%2F%2Fbacem-gpt.github.io%2Fgrok-imagine-studio%2F">Share on X</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <a class="brand" href="#"><img src="assets/logo.png" alt="" width="26" height="26">Imagine Studio</a>
+    <span class="sp"></span>
+    <a href="https://github.com/bacem-gpt/grok-imagine-studio">GitHub</a>
+    <a href="https://github.com/bacem-gpt/grok-imagine-studio/releases">Releases</a>
+    <a href="PRIVACY">Privacy</a>
+    <a href="https://github.com/bacem-gpt/grok-imagine-studio/issues">Support</a>
+    <p class="disclaimer">Independent project — not affiliated with, endorsed by, or sponsored by xAI. “Grok” is a trademark of its owner. Demo footage generated with Grok Imagine.</p>
+  </div>
+</footer>
+<script>
+// Feature demos load and play only when they scroll into view (keeps the page fast on mobile data).
+const io = 'IntersectionObserver' in window ? new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    const v = e.target;
+    if (e.isIntersecting) { v.preload = 'auto'; v.play().catch(() => {}); } else v.pause();
+  }
+}, { rootMargin: '120px' }) : null;
+document.querySelectorAll('video[data-lazy]').forEach((v) => (io ? io.observe(v) : (v.preload = 'auto', v.autoplay = true)));
+if (matchMedia('(prefers-reduced-motion: reduce)').matches) document.getElementById('promo').removeAttribute('autoplay');
+</script>
+</body>
+</html>

@@ -239,7 +239,7 @@ function Header() {
     { id: 'ingredients', label: 'Ingredients', icon: 'images', badge: ingredients || null, title: 'Reference images (Alt+5)' },
   ];
   return html`<header class="app-header">
-    <div class="brand" title="Grok Imagine Studio"><${Icon} name="logo" size=${18} /></div>
+    <div class="brand" title="Imagine Studio for Grok"><img src="../icons/icon48.png" width="22" height="22" alt="" /></div>
     <${ProjectMenuButton} />
     <${SaveIssue} />
     <${Tabs} tabs=${tabs} value=${tab} onChange=${setTab} class="app-tabs" />

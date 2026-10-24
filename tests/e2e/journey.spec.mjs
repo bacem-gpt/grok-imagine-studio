@@ -859,6 +859,8 @@ test('journey 7 · persistence: reload grok.com keeps project, bin, timeline and
       await tab.waitForFunction(() => window.__gis.bridge.connected && window.__gis.bridge.tabId != null, null, POLL);
       await expect(tab.locator('.conn-pill.is-on')).toContainText('grok.com · imagine');
       expect((await getProject(tab)).id).toBe(before.id);
+      // A new window opens on the last saved tab, which may still be the other window's previous one: go to Clips.
+      await showTab(tab, 'clips');
       await expect(tab.locator('.clips-pcard')).toHaveCount(7);
       await expect(tab.locator('.clips-pcard.is-inbin')).toHaveCount(6);
       await tab.locator(`.clips-pcard[data-key="video:${BLUE}"]`).hover();

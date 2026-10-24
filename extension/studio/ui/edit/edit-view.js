@@ -5,11 +5,12 @@
 // Owns the edit session (Player link, playhead sync), the keyboard shortcuts and 'timeline.reveal'.
 
 import { html, useEffect, useMemo, useState } from '../../../vendor/preact-htm.mjs';
+import { trackPointer } from '../pointer.js';
 import { projectStore, uiStore } from '../../core/store.js';
 import * as M from '../../core/model.js';
 import { appEvents } from '../../core/app-state.js';
 import { clamp } from '../../core/utils.js';
-import { useUI, useProject, useElementSize } from '../hooks.js';
+import { useUI, useProject, useElementSize, useDragHighlightReset } from '../hooks.js';
 import { useHotkeys, isTypingTarget } from '../hotkeys.js';
 import { Icon, IconButton, toast, cx } from '../kit.js';
 import { BinCompact } from '../media/bin-compact.js';
@@ -87,6 +88,14 @@ export function EditView({ active }) {
     setInspOpen(false);
   }, [drawers]);
   useEffect(() => setDrawerDrag(false), [drawer]);
+  // The drawer (and the inspector sheet) step aside, invisible, while a clip is dragged out of it: whatever ends the
+  // drag (a drop anywhere, a drag that left the frame, Esc…) brings the editor back, even without a dragend.
+  const endDrawerDrag = () => {
+    setDrawerDrag(false);
+    setDrawer(null);
+    if (placement === 'sheet') setInspOpen(false);
+  };
+  useDragHighlightReset(drawerDrag, endDrawerDrag);
 
   // Someone else moved uiStore.playhead (project switch, another panel): follow it.
   useEffect(
@@ -225,26 +234,21 @@ export function EditView({ active }) {
   const onSplitDown = (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
-    const el = e.currentTarget;
     const y0 = e.clientY;
     const h0 = tlHeight;
-    el.setPointerCapture(e.pointerId);
     setResizing(true);
     let last = h0;
-    const move = (ev) => {
-      last = clamp(h0 - (ev.clientY - y0), 150, Math.max(150, height - minTop));
-      setSplit(last);
-    };
-    const up = () => {
-      el.removeEventListener('pointermove', move);
-      el.removeEventListener('pointerup', up);
-      el.removeEventListener('pointercancel', up);
-      setResizing(false);
-      saveSplit(last);
-    };
-    el.addEventListener('pointermove', move);
-    el.addEventListener('pointerup', up);
-    el.addEventListener('pointercancel', up);
+    // Always ends (ui/pointer.js), so the resize cursor never stays on.
+    trackPointer(e, {
+      onMove: (ev) => {
+        last = clamp(h0 - (ev.clientY - y0), 150, Math.max(150, height - minTop));
+        setSplit(last);
+      },
+      onEnd: () => {
+        setResizing(false);
+        saveSplit(last);
+      },
+    });
   };
 
   const toggleBin = () => (drawers ? setDrawer(drawer === 'bin' ? null : 'bin') : uiStore.set((s) => ({ ...s, binOpen: !s.binOpen })));
@@ -307,13 +311,7 @@ export function EditView({ active }) {
       <aside
         class=${cx('edit-drawer', 'edit-drawer-left', drawerDrag && 'is-dragging')}
         onDragStart=${() => setTimeout(() => setDrawerDrag(true), 0)}
-        onDragEnd=${() => {
-          if (!drawerDrag) return;
-          setDrawerDrag(false);
-          setDrawer(null);
-          // the drop landed on the timeline: show it rather than the sheet that stepped aside for the drag
-          if (placement === 'sheet') setInspOpen(false);
-        }}
+        onDragEnd=${() => drawerDrag && endDrawerDrag() /* the drop landed on the timeline: show it, not the sheet */}
       >
         ${binPanel}
       </aside>`}

@@ -315,6 +315,7 @@ export class Overlay {
 
   /** Removes everything (extension context invalidated). */
   destroy() {
+    this._dragging?.(); // a drag in progress ends (its shield goes away) before the panel changes
     this._mo?.disconnect();
     clearTimeout(this._retryTimer);
     for (const off of this._cleanups) off();
@@ -444,6 +445,7 @@ export class Overlay {
 
   /** Removes the studio iframe (it never answered the handshake); the next ensureFrame() starts a fresh one. */
   destroyFrame() {
+    this._dragging?.(); // a drag in progress ends (its shield goes away) before the panel changes
     if (!this.iframe) return;
     clearTimeout(this._retryTimer);
     try {
@@ -511,6 +513,7 @@ export class Overlay {
   }
 
   toggle(force) {
+    this._dragging?.(); // a drag in progress ends (its shield goes away) before the panel changes
     const open = force === undefined ? !this.state.open : !!force;
     const wasOpen = this.state.open;
     if (open) this.ensureFrame();
@@ -530,6 +533,7 @@ export class Overlay {
    * window shows the floating window docked right).
    */
   setDock(mode, size) {
+    this._dragging?.(); // a drag in progress ends (its shield goes away) before the panel changes
     if (!['right', 'bottom', 'max', 'float'].includes(mode)) mode = 'right';
     const st = this.state;
     const wasFloating = st.open && this.effectiveMode === 'float';
@@ -754,39 +758,92 @@ export class Overlay {
     this.onLayout?.({ open, mode: eff });
   }
 
-  _wireResize() {
-    let start = null;
-    this.resizer.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      start = { x: e.clientX, y: e.clientY, w: this.state.w, h: this.state.h, fw: this.state.fw, fh: this.state.fh };
-      this.resizer.setPointerCapture(e.pointerId);
-      this.resizer.classList.add('active');
-      this.shield.hidden = false; // keep pointer events away from the iframe while dragging
-      const m = this.effectiveMode || this.state.mode;
-      this.shield.style.cursor = m === 'bottom' ? 'ns-resize' : m === 'float' ? 'nwse-resize' : 'ew-resize';
-    });
-    this.resizer.addEventListener('pointermove', (e) => {
-      if (!start) return;
-      const dx = e.clientX - start.x;
-      const dy = e.clientY - start.y;
-      const m = this.effectiveMode || this.state.mode;
-      if (m === 'right') this.state.w = Math.max(MIN_RIGHT, Math.min(window.innerWidth - 40, start.w - dx));
-      else if (m === 'bottom') this.state.h = Math.max(MIN_BOTTOM, Math.min(window.innerHeight - 40, start.h - dy));
-      else if (m === 'float') {
-        this.state.fw = Math.max(MIN_FLOAT_W, Math.min(window.innerWidth - this.state.fx - 8, start.fw + dx));
-        this.state.fh = Math.max(MIN_FLOAT_H, Math.min(window.innerHeight - this.state.fy - 8, start.fh + dy));
-      }
-      this._applyLayout();
-    });
-    const end = () => {
-      if (!start) return;
-      start = null;
-      this.resizer.classList.remove('active');
+  /**
+   * Follows a resize / move drag of the panel. The full-page shield (it keeps the pointer away from the studio iframe,
+   * which would swallow the events) MUST go away when the drag ends, whatever ends it: otherwise it stays on top of
+   * the whole page with its resize cursor and nothing can be clicked until a reload. So besides pointerup it ends on
+   * pointercancel, lost pointer capture, a move with no button pressed (release missed), window blur, the tab being
+   * hidden, Escape, and any press on the shield itself.
+   */
+  _drag(e, el, { cursor, onMove, onEnd }) {
+    if (e.button !== 0 || this._dragging) return false;
+    e.preventDefault();
+    const id = e.pointerId;
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      this._dragging = null;
+      el.classList.remove('active');
       this.shield.hidden = true;
-      this._persist();
+      this.shield.style.cursor = '';
+      el.removeEventListener('lostpointercapture', finish);
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', finish, true);
+      window.removeEventListener('blur', finish);
+      window.removeEventListener('keydown', key, true);
+      document.removeEventListener('visibilitychange', finish);
+      this.shield.removeEventListener('pointerdown', finish);
+      try {
+        if (el.hasPointerCapture?.(id)) el.releasePointerCapture(id);
+      } catch {
+        /* released already */
+      }
+      try {
+        onEnd?.();
+      } catch (err) {
+        console.warn('[gis] panel drag end failed', err);
+      }
     };
-    this.resizer.addEventListener('pointerup', end);
-    this.resizer.addEventListener('pointercancel', end);
+    const move = (ev) => {
+      if (ev.pointerId !== id) return;
+      if (ev.buttons === 0) return finish();
+      onMove(ev);
+    };
+    const up = (ev) => ev.pointerId === id && finish();
+    const key = (ev) => ev.key === 'Escape' && finish();
+    this._dragging = finish;
+    try {
+      el.setPointerCapture(id);
+    } catch {
+      /* the window listeners below still see the pointer */
+    }
+    el.classList.add('active');
+    this.shield.style.cursor = cursor;
+    this.shield.hidden = false; // keep pointer events away from the iframe while dragging
+    el.addEventListener('lostpointercapture', finish);
+    window.addEventListener('pointermove', move, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', finish, true);
+    window.addEventListener('blur', finish);
+    window.addEventListener('keydown', key, true);
+    document.addEventListener('visibilitychange', finish);
+    this.shield.addEventListener('pointerdown', finish);
+    return true;
+  }
+
+  _wireResize() {
+    this.resizer.addEventListener('pointerdown', (e) => {
+      const start = { x: e.clientX, y: e.clientY, w: this.state.w, h: this.state.h, fw: this.state.fw, fh: this.state.fh };
+      const m0 = this.effectiveMode || this.state.mode;
+      this._drag(e, this.resizer, {
+        cursor: m0 === 'bottom' ? 'ns-resize' : m0 === 'float' ? 'nwse-resize' : 'ew-resize',
+        onMove: (ev) => {
+          const dx = ev.clientX - start.x;
+          const dy = ev.clientY - start.y;
+          const m = this.effectiveMode || this.state.mode;
+          if (m === 'right') this.state.w = Math.max(MIN_RIGHT, Math.min(window.innerWidth - 40, start.w - dx));
+          else if (m === 'bottom') this.state.h = Math.max(MIN_BOTTOM, Math.min(window.innerHeight - 40, start.h - dy));
+          else if (m === 'float') {
+            this.state.fw = Math.max(MIN_FLOAT_W, Math.min(window.innerWidth - this.state.fx - 8, start.fw + dx));
+            this.state.fh = Math.max(MIN_FLOAT_H, Math.min(window.innerHeight - this.state.fy - 8, start.fh + dy));
+          }
+          this._applyLayout();
+        },
+        onEnd: () => this._persist(),
+      });
+    });
     const onResize = () => {
       this._applyLayout();
       this.placeLauncher();
@@ -797,33 +854,20 @@ export class Overlay {
 
   /** Floating mode: drag the window by its top bar. */
   _wireFloatDrag() {
-    let start = null;
     const bar = this.floatBar;
     bar.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      start = { x: e.clientX, y: e.clientY, fx: this.state.fx, fy: this.state.fy };
-      bar.setPointerCapture(e.pointerId);
-      bar.classList.add('active');
-      this.shield.hidden = false;
-      this.shield.style.cursor = 'grabbing';
+      const start = { x: e.clientX, y: e.clientY, fx: this.state.fx, fy: this.state.fy };
+      this._drag(e, bar, {
+        cursor: 'grabbing',
+        onMove: (ev) => {
+          this.state.fx = start.fx + (ev.clientX - start.x);
+          this.state.fy = start.fy + (ev.clientY - start.y);
+          this.state.floatUser = true; // their spot from now on (not moved off Grok's composer again)
+          this._applyLayout(); // clamps to the viewport
+        },
+        onEnd: () => this._persist(),
+      });
     });
-    bar.addEventListener('pointermove', (e) => {
-      if (!start) return;
-      this.state.fx = start.fx + (e.clientX - start.x);
-      this.state.fy = start.fy + (e.clientY - start.y);
-      this.state.floatUser = true; // their spot from now on (not moved off Grok's composer again)
-      this._applyLayout(); // clamps to the viewport
-    });
-    const end = () => {
-      if (!start) return;
-      start = null;
-      bar.classList.remove('active');
-      this.shield.hidden = true;
-      this._persist();
-    };
-    bar.addEventListener('pointerup', end);
-    bar.addEventListener('pointercancel', end);
     bar.addEventListener('dblclick', () => this.setDock('right'));
   }
 }

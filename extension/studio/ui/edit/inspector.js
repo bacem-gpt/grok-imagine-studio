@@ -5,6 +5,7 @@
 // step per gesture).
 
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../../vendor/preact-htm.mjs';
+import { trackPointer } from '../pointer.js';
 import { projectStore } from '../../core/store.js';
 import * as M from '../../core/model.js';
 import { renameCurrentProject } from '../../core/app-state.js';
@@ -198,21 +199,11 @@ function FocusPad({ clip, settings, ed, which }) {
     if (!inside) apply(start.x, start.y);
     const x0 = e.clientX;
     const y0 = e.clientY;
-    try {
-      padEl.setPointerCapture(e.pointerId);
-    } catch {
-      /* ignore */
-    }
-    const move = (ev) => apply(fx(start.x + (ev.clientX - x0) / pad.width), fx(start.y + (ev.clientY - y0) / pad.height));
-    const up = () => {
-      padEl.removeEventListener('pointermove', move);
-      padEl.removeEventListener('pointerup', up);
-      padEl.removeEventListener('pointercancel', up);
-      ed.end('kb-focus');
-    };
-    padEl.addEventListener('pointermove', move);
-    padEl.addEventListener('pointerup', up);
-    padEl.addEventListener('pointercancel', up);
+    trackPointer(e, {
+      target: padEl,
+      onMove: (ev) => apply(fx(start.x + (ev.clientX - x0) / pad.width), fx(start.y + (ev.clientY - y0) / pad.height)),
+      onEnd: () => ed.end('kb-focus'),
+    });
   };
   const a = framingRect(kb.from);
   const b = framingRect(kb.to);

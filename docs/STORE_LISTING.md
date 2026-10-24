@@ -1,7 +1,7 @@
-# Chrome Web Store listing — Imagine Studio for Grok 1.1.0
+# Chrome Web Store listing — Imagine Studio for Grok 1.2.0
 
 Copy each block into the matching field of the Chrome Web Store developer dashboard.
-Upload package: `grok-imagine-studio-1.1.0.zip` (release v1.1.0). Images: `store/`.
+Upload package: `grok-imagine-studio-1.2.0.zip` (release v1.2.0). Images: `store/` (also `store-assets-1.2.0.zip` on the release).
 
 **Name:** Imagine Studio for Grok
 
@@ -73,7 +73,9 @@ use or transfer it for purposes unrelated to the single purpose; does not use it
 ## Store listing tab — assets
 
 - Store icon 128×128: `extension/icons/icon128.png`
-- Screenshots 1280×800: `store/screenshot-1-dialogue.png`, `store/screenshot-2-phrases.png`, `store/screenshot-3-edit.png`, `store/screenshot-4-export.png`
+- Screenshots 1280×800: `store/screenshot-1-edit.png`, `store/screenshot-2-dialogue.png`, `store/screenshot-3-collect.png`, `store/screenshot-4-phrases.png`, `store/screenshot-5-export.png`
 - Small promo tile 440×280: `store/promo-tile-440x280.png`
-- Homepage URL: https://github.com/bacem-gpt/grok-imagine-studio
+- Marquee promo tile 1400×560: `store/marquee-1400x560.png`
+- Promo video: upload `promo-1080p.mp4` (release v1.2.0) to YouTube and paste its URL
+- Homepage URL: https://bacem-gpt.github.io/grok-imagine-studio/
 - Support URL: https://github.com/bacem-gpt/grok-imagine-studio/issues

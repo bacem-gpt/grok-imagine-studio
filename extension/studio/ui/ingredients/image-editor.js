@@ -3,6 +3,7 @@
 // written until "Save as new" / "Overwrite" / "Download" / "Copy". Local undo/redo (Ctrl/⌘+Z) covers the edits; while
 // the editor is open the header's sequence undo/redo is hidden (ingredients.css), so one undo pair is on screen.
 import { html, useState, useEffect, useRef } from '../../../vendor/preact-htm.mjs';
+import { trackPointer } from '../pointer.js';
 import { addIngredient, getIngredientBlob, replaceIngredientImage } from '../../core/ingredients.js';
 import { downloadBlob, copyImage, formatBytes } from '../../core/utils.js';
 import { useElementSize } from '../hooks.js';
@@ -200,34 +201,27 @@ export function ImageEditor({ ing, tab = 'edit', onTab, onClose, active }) {
     const el = e.currentTarget;
     const start = { x: e.clientX, y: e.clientY };
     let moved = false;
-    try {
-      el.setPointerCapture(e.pointerId);
-    } catch {
-      /* ignore */
-    }
-    const move = (ev) => {
-      const dx = (ev.clientX - start.x) / fit.scale;
-      const dy = (ev.clientY - start.y) / fit.scale;
-      if (!moved) {
-        if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 2) return;
-        moved = true;
-        beginGesture();
-        setDragging(true);
-      }
-      apply(onMove(dx, dy, ev), false);
-    };
-    const up = () => {
-      el.removeEventListener('pointermove', move);
-      el.removeEventListener('pointerup', up);
-      el.removeEventListener('pointercancel', up);
-      if (moved) {
-        endGesture();
-        setDragging(false);
-      }
-    };
-    el.addEventListener('pointermove', move);
-    el.addEventListener('pointerup', up);
-    el.addEventListener('pointercancel', up);
+    // Always ends (ui/pointer.js), so the editor never stays in "dragging" after a missed release.
+    trackPointer(e, {
+      target: el,
+      onMove: (ev) => {
+        const dx = (ev.clientX - start.x) / fit.scale;
+        const dy = (ev.clientY - start.y) / fit.scale;
+        if (!moved) {
+          if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 2) return;
+          moved = true;
+          beginGesture();
+          setDragging(true);
+        }
+        apply(onMove(dx, dy, ev), false);
+      },
+      onEnd: () => {
+        if (moved) {
+          endGesture();
+          setDragging(false);
+        }
+      },
+    });
   };
   const startMove = (e) => {
     const r0 = crop;
@@ -428,8 +422,10 @@ export function ImageEditor({ ing, tab = 'edit', onTab, onClose, active }) {
                     title="Hold to compare with the original"
                     aria-label="Hold to compare with the original"
                     disabled=${adjustIsNeutral(edits.adjust)}
-                    onPointerDown=${() => setCompare(true)}
-                    onPointerUp=${() => setCompare(false)}
+                    onPointerDown=${(e) => {
+                      setCompare(true);
+                      trackPointer(e, { onEnd: () => setCompare(false) });
+                    }}
                     onPointerLeave=${() => setCompare(false)}
                   ><${Icon} name="eye" size=${16} /></button>
                 </div>

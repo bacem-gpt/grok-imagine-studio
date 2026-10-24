@@ -1,5 +1,6 @@
 // Preact hooks bridging the framework-free stores into components.
 import { useState, useEffect, useRef, useCallback } from '../../vendor/preact-htm.mjs';
+import { trackPointer, isPrimary, onDragSessionEnd } from './pointer.js';
 import { projectStore, uiStore, pageStore, libraryStore } from '../core/store.js';
 import { shallowEqual } from '../core/utils.js';
 import { getPreviews, getMediaUrl, onMediaEvent } from '../core/media.js';
@@ -111,49 +112,50 @@ export function useEvent(fn) {
   return useCallback((...args) => ref.current(...args), []);
 }
 
-/** Pointer drag helper: returns onPointerDown; calls onMove({dx, dy, event}) and onEnd. Uses pointer capture. */
+/**
+ * Pointer drag helper: returns onPointerDown; calls onMove({dx, dy, event}) and onEnd. Always ends, even when the
+ * pointerup is never delivered (see ui/pointer.js).
+ */
 export function useDrag({ onStart, onMove, onEnd, threshold = 0 } = {}) {
   const handlers = useRef({ onStart, onMove, onEnd });
   handlers.current = { onStart, onMove, onEnd };
   return useCallback(
     (e) => {
-      if (e.button !== 0) return;
-      const target = e.currentTarget;
+      if (!isPrimary(e)) return;
       const startX = e.clientX;
       const startY = e.clientY;
       let started = threshold === 0;
       let ctx = null;
       if (started) ctx = handlers.current.onStart?.(e);
       if (ctx === false) return;
-      try {
-        target.setPointerCapture(e.pointerId);
-      } catch {
-        /* ignore */
-      }
-      const move = (ev) => {
-        const dx = ev.clientX - startX;
-        const dy = ev.clientY - startY;
-        if (!started) {
-          if (Math.hypot(dx, dy) < threshold) return;
-          started = true;
-          ctx = handlers.current.onStart?.(e);
-          if (ctx === false) return cleanup();
-        }
-        handlers.current.onMove?.({ dx, dy, event: ev, ctx });
-      };
-      const up = (ev) => {
-        cleanup();
-        if (started) handlers.current.onEnd?.({ dx: ev.clientX - startX, dy: ev.clientY - startY, event: ev, ctx, cancelled: ev.type === 'pointercancel' });
-      };
-      const cleanup = () => {
-        target.removeEventListener('pointermove', move);
-        target.removeEventListener('pointerup', up);
-        target.removeEventListener('pointercancel', up);
-      };
-      target.addEventListener('pointermove', move);
-      target.addEventListener('pointerup', up);
-      target.addEventListener('pointercancel', up);
+      const stop = trackPointer(e, {
+        onMove: (ev) => {
+          const dx = ev.clientX - startX;
+          const dy = ev.clientY - startY;
+          if (!started) {
+            if (Math.hypot(dx, dy) < threshold) return;
+            started = true;
+            ctx = handlers.current.onStart?.(e);
+            if (ctx === false) {
+              started = false;
+              return stop();
+            }
+          }
+          handlers.current.onMove?.({ dx, dy, event: ev, ctx });
+        },
+        onEnd: (ev, { cancelled }) => {
+          if (started) handlers.current.onEnd?.({ dx: ev.clientX - startX, dy: ev.clientY - startY, event: ev, ctx, cancelled });
+        },
+      });
     },
     [threshold],
   );
 }
+
+/** While `active` (a drop-target highlight is on), calls `reset` when the drag-and-drop session ends, however it ends. */
+export function useDragHighlightReset(active, reset) {
+  const fn = useRef(reset);
+  fn.current = reset;
+  useEffect(() => (active ? onDragSessionEnd(() => fn.current()) : undefined), [active]);
+}
+

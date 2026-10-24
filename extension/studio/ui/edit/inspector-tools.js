@@ -4,6 +4,7 @@
 // (drags: one merge key per gesture).
 
 import { html, useRef, useState } from '../../../vendor/preact-htm.mjs';
+import { trackPointer } from '../pointer.js';
 import { projectStore } from '../../core/store.js';
 import * as M from '../../core/model.js';
 import { formatTime } from '../../core/utils.js';
@@ -73,21 +74,7 @@ function CropPad({ clip, media, ratio }) {
     const x0 = e.clientX;
     const y0 = e.clientY;
     const merge = `crop:${clip.id}:${Date.now()}`;
-    const el = e.currentTarget;
-    try {
-      el.setPointerCapture(e.pointerId);
-    } catch {
-      /* ignore */
-    }
-    const move = (ev) => A.setCrop(clip.id, Ops.dragCrop(start, handle, (ev.clientX - x0) / pad.width, (ev.clientY - y0) / pad.height, ratio), merge);
-    const up = () => {
-      el.removeEventListener('pointermove', move);
-      el.removeEventListener('pointerup', up);
-      el.removeEventListener('pointercancel', up);
-    };
-    el.addEventListener('pointermove', move);
-    el.addEventListener('pointerup', up);
-    el.addEventListener('pointercancel', up);
+    trackPointer(e, { onMove: (ev) => A.setCrop(clip.id, Ops.dragCrop(start, handle, (ev.clientX - x0) / pad.width, (ev.clientY - y0) / pad.height, ratio), merge) });
   };
   const box = `left:${crop.x * 100}%;top:${crop.y * 100}%;width:${crop.w * 100}%;height:${crop.h * 100}%`;
   // At most 260 px tall (portrait sources), always the source's shape.

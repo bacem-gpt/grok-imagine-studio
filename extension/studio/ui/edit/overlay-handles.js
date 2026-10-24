@@ -6,6 +6,7 @@
 // compositor renders. One merge key per drag gesture = one undo step.
 
 import { html, useEffect, useRef, useState } from '../../../vendor/preact-htm.mjs';
+import { trackPointer } from '../pointer.js';
 import { projectStore } from '../../core/store.js';
 import * as M from '../../core/model.js';
 import { clamp } from '../../core/utils.js';
@@ -37,34 +38,19 @@ export function PipBoxEditor({ clip, media, W, H, label = true }) {
   const capture = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    const el = e.currentTarget;
-    try {
-      el.setPointerCapture(e.pointerId);
-    } catch {
-      /* ignore */
-    }
-    return el;
+    return e;
   };
-  const track = (el, onMove) => {
-    const move = (ev) => onMove(ev);
-    const up = () => {
-      el.removeEventListener('pointermove', move);
-      el.removeEventListener('pointerup', up);
-      el.removeEventListener('pointercancel', up);
-    };
-    el.addEventListener('pointermove', move);
-    el.addEventListener('pointerup', up);
-    el.addEventListener('pointercancel', up);
-  };
+  // Always ends (ui/pointer.js): the box never stays attached to the mouse after a missed release.
+  const track = (e, onMove) => trackPointer(e, { onMove });
   const round = (v) => Math.round(v * 1000) / 1000;
 
   const onMoveDown = (e) => {
     if (e.button !== 0) return;
-    const el = capture(e);
+    capture(e);
     const x0 = e.clientX;
     const y0 = e.clientY;
     const merge = `pip-move:${clip.id}:${++gestureSeq}`;
-    track(el, (ev) => {
+    track(e, (ev) => {
       const pos = pipPositionFor(r.x + ev.clientX - x0, r.y + ev.clientY - y0, r.w, r.h, W, H);
       // Light magnetism toward the centre lines so "centred" is easy to hit.
       const snap = (v) => (Math.abs(v - 0.5) < 0.025 ? 0.5 : v);
@@ -73,10 +59,10 @@ export function PipBoxEditor({ clip, media, W, H, label = true }) {
   };
   const onResizeDown = (e) => {
     if (e.button !== 0) return;
-    const el = capture(e);
+    capture(e);
     const x0 = e.clientX;
     const merge = `pip-scale:${clip.id}:${++gestureSeq}`;
-    track(el, (ev) => {
+    track(e, (ev) => {
       const dx = (ev.clientX - x0) * (handleRight ? 1 : -1);
       update({ scale: round(clamp((r.w + dx) / W, 0.1, 1)) }, merge);
     });

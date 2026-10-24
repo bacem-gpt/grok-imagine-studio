@@ -10,3 +10,11 @@ tests/fixtures/media/*.mp3
 tests/fixtures/media/*.wav
 tests/fixtures/media/*.jpg
 tests/fixtures/media/*.png
+brand/raw/jobs/
+brand/raw/clips/
+brand/raw/gen.sh
+brand/demo/raw/
+brand/demo/*.mp4
+brand/demo/*.webm
+brand/demo/*.jpg
+brand/demo/cards/
